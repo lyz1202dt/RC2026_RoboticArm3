@@ -4,62 +4,6 @@
      For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
 <robot
   name="robotic_arm">
-
-  <ros2_control name="arm_hw" type="system">
-    <hardware>
-    <!-- 自己编写控制器软件包的命名空间和类名 -->
-      <plugin>real_arm_hardware/RealArmControl</plugin>
-    </hardware>
-
-    <joint name="joint1">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <joint name="joint2">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <joint name="joint3">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <joint name="joint4">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <joint name="joint5">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-    </joint>
-
-    <joint name="joint6">
-      <command_interface name="position"/>
-      <command_interface name="velocity"/>
-      <command_interface name="effort"/>
-      <state_interface name="position"/>
-      <state_interface name="velocity"/>
-    </joint>
-
-</ros2_control>
   <!-- 虚拟根链接，解决KDL根链接惯量问题 -->
   <link
     name="base_link">
@@ -83,7 +27,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/base_link.STL" />
+          filename="base_link.STL" />
       </geometry>
       <material
         name="">
@@ -97,7 +41,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/base_link.STL" />
+          filename="base_link.STL" />
       </geometry>
     </collision>
   </link>
@@ -123,7 +67,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link1.STL" />
+          filename="link1.STL" />
       </geometry>
       <material
         name="">
@@ -137,7 +81,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link1.STL" />
+          filename="link1.STL" />
       </geometry>
     </collision>
   </link>
@@ -181,7 +125,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link2.STL" />
+          filename="link2.STL" />
       </geometry>
       <material
         name="">
@@ -195,7 +139,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link2.STL" />
+          filename="link2.STL" />
       </geometry>
     </collision>
   </link>
@@ -239,7 +183,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link3.STL" />
+          filename="link3.STL" />
       </geometry>
       <material
         name="">
@@ -253,7 +197,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link3.STL" />
+          filename="link3.STL" />
       </geometry>
     </collision>
   </link>
@@ -297,7 +241,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link4.STL" />
+          filename="link4.STL" />
       </geometry>
       <material
         name="">
@@ -311,7 +255,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link4.STL" />
+          filename="link4.STL" />
       </geometry>
     </collision>
   </link>
@@ -355,7 +299,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link5.STL" />
+          filename="link5.STL" />
       </geometry>
       <material
         name="">
@@ -369,7 +313,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link5.STL" />
+          filename="link5.STL" />
       </geometry>
     </collision>
   </link>
@@ -413,7 +357,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link6.STL" />
+          filename="link6.STL" />
       </geometry>
       <material
         name="">
@@ -427,7 +371,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://robotic_arm/meshes/link6.STL" />
+          filename="link6.STL" />
       </geometry>
     </collision>
   </link>

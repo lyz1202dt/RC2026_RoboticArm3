@@ -11,8 +11,12 @@
 #include <vector>
 
 #include "hardware_interface/system_interface.hpp"
+#include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/macros.hpp"
-#include "rclcpp/rclcpp.hpp"
+#include "rclcpp/logger.hpp"
+#include "rclcpp/logging.hpp"
+#include "rclcpp/node.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 namespace real_arm_hardware {
 
@@ -34,9 +38,10 @@ private:
     void handle_arm_state(const uint8_t * data, int size);
     bool start_usb_transport();
     void stop_usb_transport();
+    void start_service_node();
+    void stop_service_node();
 
     rclcpp::Logger logger_{rclcpp::get_logger("real_arm_hw")};
-    rclcpp::Node::SharedPtr node_;
 
     std::vector<std::string> joint_names_;
     std::vector<double> state_positions_;
@@ -48,21 +53,18 @@ private:
 
     std::unique_ptr<CDCTrans> cdc_trans_;
     std::unique_ptr<std::thread> usb_event_thread_;
-    std::unique_ptr<std::thread> target_send_thread_;
+    rclcpp::Node::SharedPtr service_node_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr air_pump_service_;
+    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> service_executor_;
+    std::unique_ptr<std::thread> service_thread_;
 
     std::atomic_bool exit_thread_{false};
     std::atomic_bool device_ready_{false};
-    std::mutex arm_state_mutex_;
     std::mutex arm_target_mutex_;
 
-    Arm_t arm_state_{};
     Arm_t arm_target_{};
 
-    uint16_t usb_vid_{0x0483};
-    uint16_t usb_pid_{0x5740};
-    int send_period_ms_{10};
-    bool fake_joint6_feedback_{true};
-    bool enable_air_pump_{false};
+    std::atomic_bool enable_air_pump_{false};
 };
 
 }  // namespace real_arm_hardware

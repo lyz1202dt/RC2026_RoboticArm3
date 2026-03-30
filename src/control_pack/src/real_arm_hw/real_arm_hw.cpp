@@ -1,7 +1,6 @@
 #include "real_arm_hw/real_arm_hw.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <utility>
 
@@ -28,15 +27,6 @@ hardware_interface::CallbackReturn RealArmControl::on_init(const hardware_interf
         return ret;
     }
 
-    node_ = std::make_shared<rclcpp::Node>("real_arm_hw");
-    logger_ = node_->get_logger();
-
-    usb_vid_ = static_cast<uint16_t>(node_->declare_parameter<int>("usb_vid", usb_vid_));
-    usb_pid_ = static_cast<uint16_t>(node_->declare_parameter<int>("usb_pid", usb_pid_));
-    send_period_ms_ = node_->declare_parameter<int>("send_period_ms", send_period_ms_);
-    fake_joint6_feedback_ = node_->declare_parameter<bool>("fake_joint6_feedback", fake_joint6_feedback_);
-    enable_air_pump_ = node_->declare_parameter<bool>("enable_air_pump", enable_air_pump_);
-
     if (info_.joints.size() != kJointCount) {
         RCLCPP_ERROR(logger_, "Expected %zu joints, got %zu", kJointCount, info_.joints.size());
         return hardware_interface::CallbackReturn::ERROR;
@@ -54,9 +44,8 @@ hardware_interface::CallbackReturn RealArmControl::on_init(const hardware_interf
     command_velocities_.assign(joint_names_.size(), 0.0);
     command_efforts_.assign(joint_names_.size(), 0.0);
 
-    arm_state_.pack_type = 1;
     arm_target_.pack_type = 1;
-    arm_target_.air_pump_enable = enable_air_pump_ ? 1 : 0;
+    arm_target_.air_pump_enable = enable_air_pump_.load() ? 1 : 0;
 
     return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -91,7 +80,9 @@ std::vector<hardware_interface::CommandInterface> RealArmControl::export_command
 
 hardware_interface::CallbackReturn RealArmControl::on_activate(const rclcpp_lifecycle::State &)
 {
+    start_service_node();
     if (!start_usb_transport()) {
+        stop_service_node();
         return hardware_interface::CallbackReturn::ERROR;
     }
     return hardware_interface::CallbackReturn::SUCCESS;
@@ -100,6 +91,7 @@ hardware_interface::CallbackReturn RealArmControl::on_activate(const rclcpp_life
 hardware_interface::CallbackReturn RealArmControl::on_deactivate(const rclcpp_lifecycle::State &)
 {
     stop_usb_transport();
+    stop_service_node();
     return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -112,7 +104,7 @@ hardware_interface::return_type RealArmControl::write(const rclcpp::Time &, cons
 {
     std::lock_guard<std::mutex> lock(arm_target_mutex_);
     arm_target_.pack_type = 1;
-    arm_target_.air_pump_enable = enable_air_pump_ ? 1 : 0;
+    arm_target_.air_pump_enable = enable_air_pump_.load() ? 1 : 0;
 
     for (std::size_t i = 0; i < joint_names_.size(); ++i) {
         arm_target_.joints[i].rad = static_cast<float>(command_positions_[i]);
@@ -120,7 +112,14 @@ hardware_interface::return_type RealArmControl::write(const rclcpp::Time &, cons
         arm_target_.joints[i].torque = static_cast<float>(command_efforts_[i]);
     }
 
-    return device_ready_ ? hardware_interface::return_type::OK : hardware_interface::return_type::ERROR;
+    if (!cdc_trans_) {
+        device_ready_ = false;
+        return hardware_interface::return_type::ERROR;
+    }
+
+    const bool send_ok = cdc_trans_->send_struct(arm_target_);
+    device_ready_ = send_ok;
+    return send_ok ? hardware_interface::return_type::OK : hardware_interface::return_type::ERROR;
 }
 
 void RealArmControl::handle_arm_state(const uint8_t * data, int size)
@@ -134,19 +133,12 @@ void RealArmControl::handle_arm_state(const uint8_t * data, int size)
         return;
     }
 
-    std::lock_guard<std::mutex> state_lock(arm_state_mutex_);
-    arm_state_ = *pack;
-
-    for (std::size_t i = 0; i < joint_names_.size(); ++i) {
-        state_positions_[i] = arm_state_.joints[i].rad;
-        state_velocities_[i] = arm_state_.joints[i].omega;
-        state_efforts_[i] = arm_state_.joints[i].torque;
+    for (std::size_t i = 0; i < kJointCount-1; ++i) {
+        state_positions_[i] = pack->joints[i].rad;
+        state_velocities_[i] = pack->joints[i].omega;
+        state_efforts_[i] = pack->joints[i].torque;
     }
-
-    if (fake_joint6_feedback_ && joint_names_.size() >= kJointCount) {
-        std::lock_guard<std::mutex> target_lock(arm_target_mutex_);
-        state_positions_[kJointCount - 1] = arm_target_.joints[kJointCount - 1].rad;
-    }
+    state_positions_[kJointCount - 1] = arm_target_.joints[kJointCount - 1].rad;
 }
 
 bool RealArmControl::start_usb_transport()
@@ -159,8 +151,8 @@ bool RealArmControl::start_usb_transport()
         handle_arm_state(data, size);
     });
 
-    if (!cdc_trans_->open(usb_vid_, usb_pid_)) {
-        RCLCPP_ERROR(logger_, "Failed to open USB CDC device: vid=0x%04x pid=0x%04x", usb_vid_, usb_pid_);
+    if (!cdc_trans_->open(0x0483, 0x5740)) {
+        RCLCPP_ERROR(logger_, "打开USB-CDC设备失败: vid=0x0483 pid=0x5740");
         cdc_trans_.reset();
         device_ready_ = false;
         return false;
@@ -171,26 +163,6 @@ bool RealArmControl::start_usb_transport()
     usb_event_thread_ = std::make_unique<std::thread>([this]() {
         while (!exit_thread_) {
             cdc_trans_->process_once();
-        }
-    });
-
-    target_send_thread_ = std::make_unique<std::thread>([this]() {
-        while (!exit_thread_) {
-            const auto wakeup = std::chrono::steady_clock::now() + std::chrono::milliseconds(send_period_ms_);
-
-            Arm_t target{};
-            {
-                std::lock_guard<std::mutex> lock(arm_target_mutex_);
-                target = arm_target_;
-            }
-
-            if (cdc_trans_->send_struct(target)) {
-                device_ready_ = true;
-            } else {
-                device_ready_ = false;
-            }
-
-            std::this_thread::sleep_until(wakeup);
         }
     });
 
@@ -206,11 +178,6 @@ void RealArmControl::stop_usb_transport()
     }
     usb_event_thread_.reset();
 
-    if (target_send_thread_ && target_send_thread_->joinable()) {
-        target_send_thread_->join();
-    }
-    target_send_thread_.reset();
-
     if (cdc_trans_) {
         cdc_trans_->close();
         cdc_trans_.reset();
@@ -219,6 +186,49 @@ void RealArmControl::stop_usb_transport()
     device_ready_ = false;
 }
 
+void RealArmControl::start_service_node()
+{
+    if (service_node_) {
+        return;
+    }
+
+    service_node_ = std::make_shared<rclcpp::Node>("real_arm_hw_service");
+    air_pump_service_ = service_node_->create_service<std_srvs::srv::SetBool>(
+        "~/set_air_pump",
+        [this](
+            const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+            std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+            enable_air_pump_.store(request->data);
+            response->success = true;
+            response->message = request->data ? "Air pump enabled" : "Air pump disabled";
+            RCLCPP_INFO(logger_, "Air pump state changed to: %s", request->data ? "ON" : "OFF");
+        });
+
+    service_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    service_executor_->add_node(service_node_);
+    service_thread_ = std::make_unique<std::thread>([this]() {
+        service_executor_->spin();
+    });
+}
+
+void RealArmControl::stop_service_node()
+{
+    if (service_executor_) {
+        service_executor_->cancel();
+    }
+
+    if (service_thread_ && service_thread_->joinable()) {
+        service_thread_->join();
+    }
+    service_thread_.reset();
+
+    if (service_executor_ && service_node_) {
+        service_executor_->remove_node(service_node_);
+    }
+    service_executor_.reset();
+    air_pump_service_.reset();
+    service_node_.reset();
+}
 }  // namespace real_arm_hardware
 
 PLUGINLIB_EXPORT_CLASS(real_arm_hardware::RealArmControl, hardware_interface::SystemInterface)

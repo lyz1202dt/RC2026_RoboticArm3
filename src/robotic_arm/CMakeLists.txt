@@ -11,8 +11,7 @@ find_package(ament_cmake REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 
-install(DIRECTORY urdf DESTINATION share/${PROJECT_NAME})
-install(DIRECTORY meshes/ DESTINATION share/${PROJECT_NAME}/meshes)
+install(DIRECTORY model/ DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

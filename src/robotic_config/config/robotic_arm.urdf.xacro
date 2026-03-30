@@ -1,14 +1,23 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="robotic_arm">
-    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+    <xacro:arg name="backend" default="real" />
+    <xacro:arg name="initial_positions_file" default="$(find robotic_config)/config/initial_positions.yaml" />
+
+    <xacro:property name="backend" value="$(arg backend)" />
 
     <!-- Import robotic_arm urdf file -->
-    <xacro:include filename="$(find robotic_arm)/urdf/robotic_arm.urdf" />
+    <xacro:include filename="$(find robotic_arm)/robotic_arm.urdf" />
 
     <!-- Import control_xacro -->
     <xacro:include filename="robotic_arm.ros2_control.xacro" />
 
+    <xacro:if value="${backend == 'mujoco'}">
+        <xacro:robotic_arm_mujoco_config />
+    </xacro:if>
 
-    <xacro:robotic_arm_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
+    <xacro:robotic_arm_ros2_control
+        backend="${backend}"
+        name="arm_hw"
+        initial_positions_file="$(arg initial_positions_file)"/>
 
 </robot>
