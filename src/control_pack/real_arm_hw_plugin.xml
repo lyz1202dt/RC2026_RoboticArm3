@@ -1,0 +1,8 @@
+<library path="real_arm_hw">
+  <class
+    name="real_arm_hardware/RealArmControl"
+    type="real_arm_hardware::RealArmControl"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>USB CDC based ros2_control hardware interface for the real robotic arm.</description>
+  </class>
+</library>

@@ -1,0 +1,9 @@
+<!-- 插件描述文件 -->
+
+<library path="arm_pid_controller">
+  <class name="arm_pid_controller/ArmPidController"
+         type="arm_pid_controller::ArmPidController"
+         base_class_type="controller_interface::ChainableControllerInterface">
+    <description>机械臂底层 PID 控制器，将上层期望位置/速度/力矩转换为 effort 命令。</description>
+  </class>
+</library>
