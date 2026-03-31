@@ -46,9 +46,9 @@ arm_pid_controller:
       - effort
     command_interfaces:
       - effort
-    default_kp: [60.0, 100.0, 60.0, 20.0, 10.0, 0.1]
+    default_kp: [60.0, 100.0, 40.0, 20.0, 10.0, 0.1]
     default_ki: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    default_kd: [6.0, 10.0, 6.0, 2.0, 1.0, 0.01]
+    default_kd: [6.0, 10.0, 3.0, 2.0, 1.0, 0.01]
 
 robotic_arm_controller:
   ros__parameters:
@@ -68,6 +68,7 @@ robotic_arm_controller:
       - position
       - velocity
       - effort
+    online_trajectory_topic: "/robotic_arm_controller/joint_trajectory"
 
 suction_controller:
   ros__parameters:

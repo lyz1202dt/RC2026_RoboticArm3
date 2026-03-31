@@ -24,19 +24,17 @@ def generate_launch_description():
     servo_config = os.path.join(moveit_config_dir, "config", "moveit_servo.yaml")
     servo_params = {"moveit_servo": load_yaml(servo_config)}
 
-    static_tf = Node(
+
+    static_tf_camera = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         arguments=[
-            "0.04023",
-            "-0.20514",
-            "0.26134",
-            "1.570796",
-            "-1.570796",
-            "1.570796",
-            "link1",
-            "camera_link",
+            "0.1", "0.09", "-0.03",  # x, y, z translation
+            "0.0", "0.7071068", "0.0", "0.7071068",  # quaternion (x, y, z, w) - 90° rotation about Y
+            "link4",
+            "camera_link"
         ],
+        output="screen",
     )
 
     robot_description_launch = os.path.join(launch_dir, "rsp.launch.py")
@@ -77,5 +75,5 @@ def generate_launch_description():
     )
 
     return LaunchDescription(
-        [static_tf, robot_description_launch_py, move_group, rviz_show, start_ros_control, robotic_task]
+        [static_tf_camera, robot_description_launch_py, move_group, rviz_show, start_ros_control, robotic_task]
     )

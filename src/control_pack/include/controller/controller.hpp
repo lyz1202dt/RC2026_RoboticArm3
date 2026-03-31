@@ -21,8 +21,10 @@
 #include <rclcpp/logging.hpp>
 #include <rclcpp/duration.hpp>
 #include <builtin_interfaces/msg/duration.hpp>
+#include <rclcpp/subscription.hpp>
 #include <unordered_map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -43,14 +45,21 @@ public:
     controller_interface::InterfaceConfiguration state_interface_configuration() const override;
 
 private:
+    enum class TrajectorySource {
+        OfflineAction,
+        OnlineServo
+    };
 
     rclcpp_action::Server<control_msgs::action::FollowJointTrajectory>::SharedPtr trajectory_action_server_;
+    rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr online_trajectory_sub_;
     std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> activate_goal_handle_;
     control_msgs::action::FollowJointTrajectory::Feedback::SharedPtr feedback_msg;
     control_msgs::action::FollowJointTrajectory::Result::SharedPtr result_msg;
     trajectory_msgs::msg::JointTrajectory current_trajectory_;
-    size_t trajectory_index_;
+    size_t trajectory_index_{0};
     rclcpp::Time trajectory_start_time;
+    rclcpp::Time last_offline_finish_time_{0, 0, RCL_ROS_TIME};
+    mutable std::mutex trajectory_mutex_;
 
     std::vector<std::string> joint_names_;
     std::vector<std::string> command_interface_types_;
@@ -58,6 +67,7 @@ private:
     std::unordered_map<std::string, size_t> command_interface_index_map_;
     std::unordered_map<std::string, size_t> state_interface_index_map_;
     std::string command_prefix_;
+    std::string online_trajectory_topic_;
 
     KDL::Tree tree;
     KDL::Chain chain;
@@ -76,8 +86,16 @@ private:
     rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID &uuid,const std::shared_ptr<const control_msgs::action::FollowJointTrajectory::Goal> goal);
     rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> goal_handle);
     void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> goal_handle);
+    void handle_online_trajectory(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
+    void start_trajectory_execution(
+        const trajectory_msgs::msg::JointTrajectory& trajectory,
+        TrajectorySource source,
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>>& goal_handle = nullptr);
+    void finish_active_trajectory(bool succeeded, const std::string& message);
+    bool is_valid_trajectory(const trajectory_msgs::msg::JointTrajectory& trajectory, const char* source_name) const;
 
     bool is_execut_trajectory{false};
+    bool servo_mode{false};
     bool cancle_execut{false};
     bool finished_execut{false};
 

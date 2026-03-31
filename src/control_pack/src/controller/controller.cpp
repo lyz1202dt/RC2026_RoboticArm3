@@ -15,6 +15,7 @@ TrajectoryController::TrajectoryController() {}
 controller_interface::CallbackReturn TrajectoryController::on_init() {
     RCLCPP_INFO(this->get_node()->get_logger(), "混合控制器初始化");
     param_node = std::make_shared<rclcpp::Node>("param_node");
+    last_offline_finish_time_ = get_node()->get_clock()->now();
 
     joint_names_ = auto_declare<std::vector<std::string>>(
         "joints", {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6"});
@@ -23,6 +24,8 @@ controller_interface::CallbackReturn TrajectoryController::on_init() {
     state_interface_types_ = auto_declare<std::vector<std::string>>(
         "state_interfaces", {"position", "velocity", "effort"});
     command_prefix_ = auto_declare<std::string>("command_prefix", "");
+    online_trajectory_topic_ = auto_declare<std::string>(
+        "online_trajectory_topic", "/robotic_arm_controller/joint_trajectory");
 
     trajectory_action_server_ = rclcpp_action::create_server<control_msgs::action::FollowJointTrajectory>(
         get_node(), "robotic_arm_controller/arm_command",
@@ -52,6 +55,7 @@ controller_interface::CallbackReturn TrajectoryController::on_configure(const rc
     command_interface_types_ = get_node()->get_parameter("command_interfaces").as_string_array();
     state_interface_types_ = get_node()->get_parameter("state_interfaces").as_string_array();
     command_prefix_ = get_node()->get_parameter("command_prefix").as_string();
+    online_trajectory_topic_ = get_node()->get_parameter("online_trajectory_topic").as_string();
 
     if (joint_names_.empty()) {
         RCLCPP_ERROR(get_node()->get_logger(), "参数 joints 不能为空");
@@ -94,6 +98,15 @@ controller_interface::CallbackReturn TrajectoryController::on_configure(const rc
     gravity.z(-9.81);
 
     dyn = std::make_shared<KDL::ChainDynParam>(chain, gravity);
+    online_trajectory_sub_ = get_node()->create_subscription<trajectory_msgs::msg::JointTrajectory>(
+        online_trajectory_topic_,
+        rclcpp::SystemDefaultsQoS(),
+        std::bind(&TrajectoryController::handle_online_trajectory, this, std::placeholders::_1)
+    );
+    RCLCPP_INFO(
+        get_node()->get_logger(),
+        "在线轨迹订阅已创建: %s",
+        online_trajectory_topic_.c_str());
 
     return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -106,6 +119,7 @@ controller_interface::CallbackReturn TrajectoryController::on_activate(const rcl
 
 controller_interface::CallbackReturn TrajectoryController::on_deactivate(const rclcpp_lifecycle::State& previous_state) {
     (void)previous_state;
+    online_trajectory_sub_.reset();
     RCLCPP_INFO(this->get_node()->get_logger(), "停用控制器");
     return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -114,30 +128,66 @@ controller_interface::return_type TrajectoryController::update(const rclcpp::Tim
     (void)time;
     (void)period;
 
-    if (!is_execut_trajectory) {
+    trajectory_msgs::msg::JointTrajectoryPoint output_state;
+    std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> goal_handle;
+    bool local_servo_mode = false;
+    bool should_finish = false;
+    bool finish_succeeded = false;
+    std::string finish_message;
+
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+
+        if (!is_execut_trajectory) {
+            return controller_interface::return_type::OK;
+        }
+        if (cancle_execut) {
+            should_finish = true;
+            finish_succeeded = false;
+            finish_message = "Trajectory canceled";
+            goal_handle = activate_goal_handle_;
+            local_servo_mode = servo_mode;
+        } else if (current_trajectory_.points.empty()) {
+            RCLCPP_ERROR(this->get_node()->get_logger(), "活动轨迹意外为空，终止本次执行");
+            should_finish = true;
+            finish_succeeded = false;
+            finish_message = "Active trajectory became empty";
+            goal_handle = activate_goal_handle_;
+            local_servo_mode = servo_mode;
+        } else {
+            const auto now = get_node()->get_clock()->now();
+            const auto elapsed = now - trajectory_start_time;
+
+            while (trajectory_index_ + 1 < current_trajectory_.points.size() &&
+                   elapsed > rclcpp::Duration(current_trajectory_.points[trajectory_index_].time_from_start)) {
+                ++trajectory_index_;
+            }
+
+            // 使用三次贝塞尔曲线对相邻轨迹点做平滑，连续输出位置/速度/加速度。
+            output_state = interpolate_bezier_point(elapsed);
+            goal_handle = activate_goal_handle_;
+            local_servo_mode = servo_mode;
+
+            const auto trajectory_end = rclcpp::Duration(current_trajectory_.points.back().time_from_start);
+            if (elapsed >= trajectory_end) {
+                trajectory_index_ = current_trajectory_.points.size() - 1;
+                should_finish = true;
+                finish_succeeded = true;
+                finish_message = "Trajectory finished";
+            }
+        }
+    }
+
+    if (should_finish && output_state.positions.empty()) {
+        finish_active_trajectory(finish_succeeded, finish_message);
         return controller_interface::return_type::OK;
     }
-    if (current_trajectory_.points.empty()) {
-        is_execut_trajectory = false;
-        RCLCPP_ERROR(this->get_node()->get_logger(), "当前轨迹为空，停止执行");
-        return controller_interface::return_type::ERROR;
-    }
 
-    const auto now = get_node()->get_clock()->now();
-    const auto elapsed = now - trajectory_start_time;
-
-    while (trajectory_index_ + 1 < current_trajectory_.points.size() &&
-           elapsed > rclcpp::Duration(current_trajectory_.points[trajectory_index_].time_from_start)) {
-        ++trajectory_index_;
-    }
-
-    // 使用三次贝塞尔曲线对相邻轨迹点做平滑，连续输出位置/速度/加速度。
-    const auto output_state = interpolate_bezier_point(elapsed);
     if (output_state.positions.size() != joint_names_.size() || output_state.velocities.size() != joint_names_.size() ||
         output_state.accelerations.size() != joint_names_.size()) {
         RCLCPP_ERROR(this->get_node()->get_logger(), "插值轨迹点维度异常，停止执行");
-        is_execut_trajectory = false;
-        return controller_interface::return_type::ERROR;
+        finish_active_trajectory(false, "Interpolated point dimension mismatch");
+        return controller_interface::return_type::OK;
     }
 
     for (size_t i = 0; i < joint_names_.size(); ++i) {
@@ -160,28 +210,26 @@ controller_interface::return_type TrajectoryController::update(const rclcpp::Tim
         }
     }
 
-    feedback_msg->joint_names = joint_names_;
-    feedback_msg->desired = output_state;
-    feedback_msg->actual.positions.resize(joint_names_.size());
-    feedback_msg->actual.velocities.resize(joint_names_.size());
-    feedback_msg->actual.effort.resize(joint_names_.size());
+    if (!local_servo_mode && goal_handle) {
+        auto feedback = std::make_shared<control_msgs::action::FollowJointTrajectory::Feedback>();
+        feedback->joint_names = joint_names_;
+        feedback->desired = output_state;
+        feedback->actual.positions.resize(joint_names_.size());
+        feedback->actual.velocities.resize(joint_names_.size());
+        feedback->actual.effort.resize(joint_names_.size());
 
-    for (size_t i = 0; i < joint_names_.size(); ++i) {
-        feedback_msg->actual.positions[i] = read_state_value(i, "position");
-        feedback_msg->actual.velocities[i] = read_state_value(i, "velocity");
-        feedback_msg->actual.effort[i] = state_interface_index_map_.count("effort") > 0 ? read_state_value(i, "effort") : 0.0;
+        for (size_t i = 0; i < joint_names_.size(); ++i) {
+            feedback->actual.positions[i] = read_state_value(i, "position");
+            feedback->actual.velocities[i] = read_state_value(i, "velocity");
+            feedback->actual.effort[i] = state_interface_index_map_.count("effort") > 0 ? read_state_value(i, "effort") : 0.0;
+        }
+
+        feedback->header.stamp = get_node()->now();
+        goal_handle->publish_feedback(feedback);
     }
 
-    feedback_msg->header.stamp = get_node()->now();
-    activate_goal_handle_->publish_feedback(feedback_msg);
-
-    const auto trajectory_end = rclcpp::Duration(current_trajectory_.points.back().time_from_start);
-    if (elapsed >= trajectory_end) {
-        trajectory_index_ = current_trajectory_.points.size() - 1;
-        is_execut_trajectory = false;
-        result_msg->error_code = control_msgs::action::FollowJointTrajectory::Result::SUCCESSFUL;
-        result_msg->error_string = "Trajectory finished";
-        activate_goal_handle_->succeed(result_msg);
+    if (should_finish) {
+        finish_active_trajectory(finish_succeeded, finish_message);
     }
 
     return controller_interface::return_type::OK;
@@ -220,17 +268,15 @@ rclcpp_action::GoalResponse TrajectoryController::handle_goal(
 ) {
     (void)uuid;
 
-    if (is_execut_trajectory) {
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+        if (!servo_mode && is_execut_trajectory) {
+            return rclcpp_action::GoalResponse::REJECT;
+        }
+    }
+    if (!is_valid_trajectory(goal->trajectory, "离线")) {
         return rclcpp_action::GoalResponse::REJECT;
     }
-    if (goal->trajectory.points.empty()) {
-        RCLCPP_WARN(this->get_node()->get_logger(), "收到空轨迹，拒绝执行");
-        return rclcpp_action::GoalResponse::REJECT;
-    }
-
-    cancle_execut = false;
-    current_trajectory_ = goal->trajectory;
-    trajectory_index_ = 0;
 
     RCLCPP_INFO(this->get_node()->get_logger(), "接受轨迹");
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
@@ -240,7 +286,7 @@ rclcpp_action::CancelResponse TrajectoryController::handle_cancel(
     const std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> goal_handle
 ) {
     (void)goal_handle;
-    is_execut_trajectory = false;
+    std::lock_guard<std::mutex> lock(trajectory_mutex_);
     cancle_execut = true;
     return rclcpp_action::CancelResponse::ACCEPT;
 }
@@ -248,10 +294,145 @@ rclcpp_action::CancelResponse TrajectoryController::handle_cancel(
 void TrajectoryController::handle_accepted(
     const std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> goal_handle
 ) {
-    is_execut_trajectory = true;
-    activate_goal_handle_ = goal_handle;
-    RCLCPP_INFO(this->get_node()->get_logger(), "执行轨迹");
-    trajectory_start_time = get_node()->get_clock()->now();
+    start_trajectory_execution(goal_handle->get_goal()->trajectory, TrajectorySource::OfflineAction, goal_handle);
+}
+
+void TrajectoryController::handle_online_trajectory(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg) {
+    if (!is_valid_trajectory(*msg, "在线")) {
+        return;
+    }
+
+    if (!msg->header.stamp.sec && !msg->header.stamp.nanosec) {
+        RCLCPP_DEBUG(this->get_node()->get_logger(), "忽略未携带时间戳的在线轨迹");
+        return;
+    }
+
+    const rclcpp::Time message_stamp(msg->header.stamp);
+    rclcpp::Time last_offline_finish_time;
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+        last_offline_finish_time = last_offline_finish_time_;
+    }
+    if (message_stamp <= last_offline_finish_time) {
+        RCLCPP_DEBUG(
+            this->get_node()->get_logger(),
+            "忽略离线轨迹完成时间之前发布的在线轨迹: %.6f <= %.6f",
+            message_stamp.seconds(),
+            last_offline_finish_time.seconds());
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+        if (!servo_mode && is_execut_trajectory) {
+            RCLCPP_DEBUG(this->get_node()->get_logger(), "离线轨迹执行中，丢弃在线轨迹");
+            return;
+        }
+    }
+
+    start_trajectory_execution(*msg, TrajectorySource::OnlineServo);
+}
+
+void TrajectoryController::start_trajectory_execution(
+    const trajectory_msgs::msg::JointTrajectory& trajectory,
+    TrajectorySource source,
+    const std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>>& goal_handle) {
+    bool should_preempt_online = false;
+    bool local_servo_mode = false;
+    size_t point_count = 0;
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+        should_preempt_online = (source == TrajectorySource::OfflineAction && servo_mode && is_execut_trajectory);
+    }
+
+    if (should_preempt_online) {
+        RCLCPP_INFO(this->get_node()->get_logger(), "离线轨迹到达，抢占当前在线轨迹");
+        finish_active_trajectory(false, "Preempted by offline trajectory");
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+        servo_mode = (source == TrajectorySource::OnlineServo);
+        cancle_execut = false;
+        current_trajectory_ = trajectory;
+        trajectory_index_ = 0;
+        trajectory_start_time = get_node()->get_clock()->now();
+        activate_goal_handle_ = goal_handle;
+        is_execut_trajectory = true;
+        local_servo_mode = servo_mode;
+        point_count = current_trajectory_.points.size();
+    }
+
+    RCLCPP_INFO(
+        this->get_node()->get_logger(),
+        "开始执行%s轨迹，轨迹点数: %zu",
+        local_servo_mode ? "在线" : "离线",
+        point_count);
+}
+
+void TrajectoryController::finish_active_trajectory(bool succeeded, const std::string& message) {
+    bool finishing_online = false;
+    std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> goal_handle;
+
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+        finishing_online = servo_mode;
+        goal_handle = activate_goal_handle_;
+        is_execut_trajectory = false;
+        cancle_execut = false;
+        trajectory_index_ = 0;
+        current_trajectory_ = trajectory_msgs::msg::JointTrajectory{};
+        activate_goal_handle_.reset();
+        servo_mode = false;
+    }
+
+    if (finishing_online) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(trajectory_mutex_);
+        last_offline_finish_time_ = get_node()->get_clock()->now();
+    }
+
+    if (goal_handle) {
+        auto result = std::make_shared<control_msgs::action::FollowJointTrajectory::Result>();
+        result->error_code = succeeded ?
+            control_msgs::action::FollowJointTrajectory::Result::SUCCESSFUL :
+            control_msgs::action::FollowJointTrajectory::Result::INVALID_GOAL;
+        result->error_string = message;
+
+        if (succeeded) {
+            if (goal_handle->is_active() && goal_handle->is_executing()) {
+                goal_handle->succeed(result);
+            }
+        } else if (goal_handle->is_canceling()) {
+            goal_handle->canceled(result);
+        } else {
+            if (goal_handle->is_active() && goal_handle->is_executing()) {
+                goal_handle->abort(result);
+            }
+        }
+    }
+}
+
+bool TrajectoryController::is_valid_trajectory(
+    const trajectory_msgs::msg::JointTrajectory& trajectory,
+    const char* source_name) const {
+    if (trajectory.points.empty()) {
+        RCLCPP_WARN(this->get_node()->get_logger(), "收到空%s轨迹，拒绝执行", source_name);
+        return false;
+    }
+    if (!trajectory.joint_names.empty() && trajectory.joint_names.size() != joint_names_.size()) {
+        RCLCPP_WARN(
+            this->get_node()->get_logger(),
+            "收到%s轨迹关节数异常: %zu != %zu",
+            source_name,
+            trajectory.joint_names.size(),
+            joint_names_.size());
+        return false;
+    }
+    return true;
 }
 
 trajectory_msgs::msg::JointTrajectoryPoint TrajectoryController::interpolate_bezier_point(const rclcpp::Duration& elapsed) const {

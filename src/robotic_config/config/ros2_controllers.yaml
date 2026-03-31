@@ -40,6 +40,7 @@ robotic_arm_controller:
       - velocity
       - effort
     command_prefix: ""
+    online_trajectory_topic: "/robotic_arm_controller/joint_trajectory"
     allow_nonzero_velocity_at_trajectory_end: false
 
 suction_controller:
