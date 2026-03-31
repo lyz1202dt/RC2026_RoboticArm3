@@ -6,17 +6,16 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "hardware_interface/system_interface.hpp"
-#include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/macros.hpp"
 #include "rclcpp/logger.hpp"
 #include "rclcpp/logging.hpp"
 #include "rclcpp/node.hpp"
-#include "std_srvs/srv/set_bool.hpp"
 
 namespace real_arm_hardware {
 
@@ -38,8 +37,6 @@ private:
     void handle_arm_state(const uint8_t * data, int size);
     bool start_usb_transport();
     void stop_usb_transport();
-    void start_service_node();
-    void stop_service_node();
 
     rclcpp::Logger logger_{rclcpp::get_logger("real_arm_hw")};
 
@@ -50,13 +47,15 @@ private:
     std::vector<double> command_positions_;
     std::vector<double> command_velocities_;
     std::vector<double> command_efforts_;
+    std::vector<std::string> gpio_command_names_;
+    std::vector<std::string> gpio_state_names_;
+    std::vector<double> gpio_command_values_;
+    std::vector<double> gpio_state_values_;
+    std::size_t air_pump_command_index_{std::numeric_limits<std::size_t>::max()};
+    std::size_t air_pump_state_index_{std::numeric_limits<std::size_t>::max()};
 
     std::unique_ptr<CDCTrans> cdc_trans_;
     std::unique_ptr<std::thread> usb_event_thread_;
-    rclcpp::Node::SharedPtr service_node_;
-    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr air_pump_service_;
-    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> service_executor_;
-    std::unique_ptr<std::thread> service_thread_;
 
     std::atomic_bool exit_thread_{false};
     std::atomic_bool device_ready_{false};

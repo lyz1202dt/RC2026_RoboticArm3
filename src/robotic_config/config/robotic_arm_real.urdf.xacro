@@ -59,6 +59,11 @@
         <state_interface name="velocity"/>
         <state_interface name="effort"/>
       </joint>
+
+      <gpio name="suction">
+        <command_interface name="vacuum" data_type="bool"/>
+        <state_interface name="vacuum" data_type="bool"/>
+      </gpio>
     </ros2_control>
   </xacro:macro>
 </robot>

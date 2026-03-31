@@ -289,6 +289,14 @@ namespace mujoco_ros2_control {
 
         };
 
+        struct GpioData {
+            std::string name;
+            std::vector<std::string> command_interface_names;
+            std::vector<double> command_values;
+            std::vector<std::string> state_interface_names;
+            std::vector<double> state_values;
+        };
+
         /**
          * @brief Last update simulation time in ROS.
          *
@@ -320,6 +328,7 @@ namespace mujoco_ros2_control {
 
     protected:
         std::map<std::string, JointData> joints_; ///< Map of joint names to JointData structs.
+        std::map<std::string, GpioData> gpios_; ///< Map of gpio names to dummy GPIO interface storage.
         std::vector<MimicJoint> mimiced_joints_; ///!< Mimiced Joints
         std::string name_;
     };

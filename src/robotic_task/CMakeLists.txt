@@ -60,6 +60,7 @@ ament_target_dependencies(robotic_task
   trajectory_msgs
   moveit_ros_planning_interface
   moveit_msgs
+  moveit_core
   moveit_servo
   robot_interfaces
   tf2_geometry_msgs

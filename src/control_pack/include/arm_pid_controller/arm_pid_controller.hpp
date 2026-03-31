@@ -34,13 +34,13 @@ private:
     double get_reference_value(size_t joint_index, const std::string &interface_name, double default_value) const;
 
     std::vector<std::string> joint_names_;
+    std::vector<std::string> command_interface_types_;
     std::vector<std::string> state_interface_types_;
     std::vector<std::string> reference_interface_types_;
     std::unordered_map<std::string, size_t> reference_interface_index_map_;
     std::unordered_map<std::string, std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> *>
         state_interface_map_;
 
-    std::vector<double> reference_interfaces_;
     std::vector<double> default_kp_;
     std::vector<double> default_ki_;
     std::vector<double> default_kd_;

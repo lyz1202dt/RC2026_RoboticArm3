@@ -69,6 +69,43 @@ namespace mujoco_ros2_control {
         for (const auto &joint : joints_to_remove) {
             joints_.erase(joint);
         }
+
+        for (const auto & gpio_info : hardware_info.gpios) {
+            GpioData gpio;
+            gpio.name = gpio_info.name;
+            gpio.command_interface_names.reserve(gpio_info.command_interfaces.size());
+            gpio.command_values.reserve(gpio_info.command_interfaces.size());
+            gpio.state_interface_names.reserve(gpio_info.state_interfaces.size());
+            gpio.state_values.reserve(gpio_info.state_interfaces.size());
+
+            for (const auto & command_interface : gpio_info.command_interfaces) {
+                gpio.command_interface_names.push_back(command_interface.name);
+                gpio.command_values.push_back(0.0);
+            }
+
+            for (const auto & state_interface : gpio_info.state_interfaces) {
+                gpio.state_interface_names.push_back(state_interface.name);
+                gpio.state_values.push_back(0.0);
+            }
+
+            auto [it, inserted] = gpios_.emplace(gpio.name, std::move(gpio));
+            (void) inserted;
+            auto & stored_gpio = it->second;
+
+            for (std::size_t i = 0; i < stored_gpio.command_interface_names.size(); ++i) {
+                command_interfaces_.emplace_back(
+                    stored_gpio.name,
+                    stored_gpio.command_interface_names[i],
+                    &stored_gpio.command_values[i]);
+            }
+
+            for (std::size_t i = 0; i < stored_gpio.state_interface_names.size(); ++i) {
+                state_interfaces_.emplace_back(
+                    stored_gpio.name,
+                    stored_gpio.state_interface_names[i],
+                    &stored_gpio.state_values[i]);
+            }
+        }
         return true;
     }
 
@@ -402,6 +439,14 @@ namespace mujoco_ros2_control {
             joint.velocity = mujoco_data_->qvel[joint.mujoco_dofadr];
             // Read actual actuator force instead of applied force
             joint.effort = mujoco_data_->qfrc_actuator[joint.mujoco_dofadr];
+        }
+
+        for (auto & gpio_item : gpios_) {
+            auto & gpio = gpio_item.second;
+            const std::size_t mirrored_count = std::min(gpio.command_values.size(), gpio.state_values.size());
+            for (std::size_t i = 0; i < mirrored_count; ++i) {
+                gpio.state_values[i] = gpio.command_values[i];
+            }
         }
         return hardware_interface::return_type::OK;
     }

@@ -21,7 +21,6 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(robot_interfaces REQUIRED)
-find_package(std_srvs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
@@ -111,7 +110,6 @@ ament_target_dependencies(real_arm_hw
   rclcpp
   rclcpp_lifecycle
   robot_interfaces
-  std_srvs
 )
 
 install(

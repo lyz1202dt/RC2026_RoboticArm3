@@ -8,6 +8,8 @@ controller_manager:
     robotic_arm_controller:
       type: "trajectory_controller/TrajectoryController"
 
+    suction_controller:
+      type: gpio_controllers/GpioCommandController
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
@@ -39,3 +41,16 @@ robotic_arm_controller:
       - effort
     command_prefix: ""
     allow_nonzero_velocity_at_trajectory_end: false
+
+suction_controller:
+  ros__parameters:
+    gpios:
+      - suction
+    command_interfaces:
+      suction:
+        interfaces:
+          - vacuum
+    state_interfaces:
+      suction:
+        interfaces:
+          - vacuum

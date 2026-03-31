@@ -12,6 +12,7 @@ namespace real_arm_hardware {
 namespace {
 
 constexpr std::size_t kJointCount = 6;
+constexpr char kVacuumInterfaceName[] = "vacuum";
 
 }
 
@@ -43,9 +44,42 @@ hardware_interface::CallbackReturn RealArmControl::on_init(const hardware_interf
     command_positions_.assign(joint_names_.size(), 0.0);
     command_velocities_.assign(joint_names_.size(), 0.0);
     command_efforts_.assign(joint_names_.size(), 0.0);
+    gpio_command_names_.clear();
+    gpio_state_names_.clear();
+    gpio_command_values_.clear();
+    gpio_state_values_.clear();
+    air_pump_command_index_ = std::numeric_limits<std::size_t>::max();
+    air_pump_state_index_ = std::numeric_limits<std::size_t>::max();
+
+    for (const auto & gpio : info_.gpios) {
+        for (const auto & command_interface : gpio.command_interfaces) {
+            gpio_command_names_.push_back(gpio.name);
+            gpio_command_values_.push_back(0.0);
+
+            if (command_interface.name == kVacuumInterfaceName) {
+                air_pump_command_index_ = gpio_command_values_.size() - 1;
+            }
+        }
+
+        for (const auto & state_interface : gpio.state_interfaces) {
+            gpio_state_names_.push_back(gpio.name);
+            gpio_state_values_.push_back(0.0);
+
+            if (state_interface.name == kVacuumInterfaceName) {
+                air_pump_state_index_ = gpio_state_values_.size() - 1;
+            }
+        }
+    }
 
     arm_target_.pack_type = 1;
     arm_target_.air_pump_enable = enable_air_pump_.load() ? 1 : 0;
+
+    if (air_pump_command_index_ != std::numeric_limits<std::size_t>::max()) {
+        gpio_command_values_[air_pump_command_index_] = static_cast<double>(arm_target_.air_pump_enable);
+    }
+    if (air_pump_state_index_ != std::numeric_limits<std::size_t>::max()) {
+        gpio_state_values_[air_pump_state_index_] = static_cast<double>(arm_target_.air_pump_enable);
+    }
 
     return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -53,12 +87,20 @@ hardware_interface::CallbackReturn RealArmControl::on_init(const hardware_interf
 std::vector<hardware_interface::StateInterface> RealArmControl::export_state_interfaces()
 {
     std::vector<hardware_interface::StateInterface> state_interfaces;
-    state_interfaces.reserve(joint_names_.size() * 3);
+    state_interfaces.reserve(joint_names_.size() * 3 + gpio_state_values_.size());
 
     for (std::size_t i = 0; i < joint_names_.size(); ++i) {
-        state_interfaces.emplace_back(joint_names_[i], hardware_interface::HW_IF_POSITION, &state_positions_[i]);
-        state_interfaces.emplace_back(joint_names_[i], hardware_interface::HW_IF_VELOCITY, &state_velocities_[i]);
-        state_interfaces.emplace_back(joint_names_[i], hardware_interface::HW_IF_EFFORT, &state_efforts_[i]);
+        state_interfaces.emplace_back(joint_names_[i], "position", &state_positions_[i]);
+        state_interfaces.emplace_back(joint_names_[i], "velocity", &state_velocities_[i]);
+        state_interfaces.emplace_back(joint_names_[i], "effort", &state_efforts_[i]);
+    }
+
+    std::size_t gpio_index = 0;
+    for (const auto & gpio : info_.gpios) {
+        for (const auto & state_interface : gpio.state_interfaces) {
+            state_interfaces.emplace_back(gpio.name, state_interface.name, &gpio_state_values_[gpio_index]);
+            ++gpio_index;
+        }
     }
 
     return state_interfaces;
@@ -67,12 +109,20 @@ std::vector<hardware_interface::StateInterface> RealArmControl::export_state_int
 std::vector<hardware_interface::CommandInterface> RealArmControl::export_command_interfaces()
 {
     std::vector<hardware_interface::CommandInterface> command_interfaces;
-    command_interfaces.reserve(joint_names_.size() * 3);
+    command_interfaces.reserve(joint_names_.size() * 3 + gpio_command_values_.size());
 
     for (std::size_t i = 0; i < joint_names_.size(); ++i) {
-        command_interfaces.emplace_back(joint_names_[i], hardware_interface::HW_IF_POSITION, &command_positions_[i]);
-        command_interfaces.emplace_back(joint_names_[i], hardware_interface::HW_IF_VELOCITY, &command_velocities_[i]);
-        command_interfaces.emplace_back(joint_names_[i], hardware_interface::HW_IF_EFFORT, &command_efforts_[i]);
+        command_interfaces.emplace_back(joint_names_[i], "position", &command_positions_[i]);
+        command_interfaces.emplace_back(joint_names_[i], "velocity", &command_velocities_[i]);
+        command_interfaces.emplace_back(joint_names_[i], "effort", &command_efforts_[i]);
+    }
+
+    std::size_t gpio_index = 0;
+    for (const auto & gpio : info_.gpios) {
+        for (const auto & command_interface : gpio.command_interfaces) {
+            command_interfaces.emplace_back(gpio.name, command_interface.name, &gpio_command_values_[gpio_index]);
+            ++gpio_index;
+        }
     }
 
     return command_interfaces;
@@ -80,31 +130,47 @@ std::vector<hardware_interface::CommandInterface> RealArmControl::export_command
 
 hardware_interface::CallbackReturn RealArmControl::on_activate(const rclcpp_lifecycle::State &)
 {
-    start_service_node();
     if (!start_usb_transport()) {
-        stop_service_node();
         return hardware_interface::CallbackReturn::ERROR;
     }
+
+    const double initial_air_pump_value = enable_air_pump_.load() ? 1.0 : 0.0;
+    if (air_pump_command_index_ != std::numeric_limits<std::size_t>::max()) {
+        gpio_command_values_[air_pump_command_index_] = initial_air_pump_value;
+    }
+    if (air_pump_state_index_ != std::numeric_limits<std::size_t>::max()) {
+        gpio_state_values_[air_pump_state_index_] = initial_air_pump_value;
+    }
+
     return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::CallbackReturn RealArmControl::on_deactivate(const rclcpp_lifecycle::State &)
 {
     stop_usb_transport();
-    stop_service_node();
     return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 hardware_interface::return_type RealArmControl::read(const rclcpp::Time &, const rclcpp::Duration &)
 {
+    if (air_pump_state_index_ != std::numeric_limits<std::size_t>::max()) {
+        gpio_state_values_[air_pump_state_index_] = enable_air_pump_.load() ? 1.0 : 0.0;
+    }
     return device_ready_ ? hardware_interface::return_type::OK : hardware_interface::return_type::ERROR;
 }
 
 hardware_interface::return_type RealArmControl::write(const rclcpp::Time &, const rclcpp::Duration &)
 {
     std::lock_guard<std::mutex> lock(arm_target_mutex_);
+    if (air_pump_command_index_ != std::numeric_limits<std::size_t>::max()) {
+        enable_air_pump_ = gpio_command_values_[air_pump_command_index_] >= 0.5;
+    }
     arm_target_.pack_type = 1;
     arm_target_.air_pump_enable = enable_air_pump_.load() ? 1 : 0;
+
+    if (air_pump_state_index_ != std::numeric_limits<std::size_t>::max()) {
+        gpio_state_values_[air_pump_state_index_] = static_cast<double>(arm_target_.air_pump_enable);
+    }
 
     for (std::size_t i = 0; i < joint_names_.size(); ++i) {
         arm_target_.joints[i].rad = static_cast<float>(command_positions_[i]);
@@ -186,49 +252,6 @@ void RealArmControl::stop_usb_transport()
     device_ready_ = false;
 }
 
-void RealArmControl::start_service_node()
-{
-    if (service_node_) {
-        return;
-    }
-
-    service_node_ = std::make_shared<rclcpp::Node>("real_arm_hw_service");
-    air_pump_service_ = service_node_->create_service<std_srvs::srv::SetBool>(
-        "~/set_air_pump",
-        [this](
-            const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-            std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
-            enable_air_pump_.store(request->data);
-            response->success = true;
-            response->message = request->data ? "Air pump enabled" : "Air pump disabled";
-            RCLCPP_INFO(logger_, "Air pump state changed to: %s", request->data ? "ON" : "OFF");
-        });
-
-    service_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
-    service_executor_->add_node(service_node_);
-    service_thread_ = std::make_unique<std::thread>([this]() {
-        service_executor_->spin();
-    });
-}
-
-void RealArmControl::stop_service_node()
-{
-    if (service_executor_) {
-        service_executor_->cancel();
-    }
-
-    if (service_thread_ && service_thread_->joinable()) {
-        service_thread_->join();
-    }
-    service_thread_.reset();
-
-    if (service_executor_ && service_node_) {
-        service_executor_->remove_node(service_node_);
-    }
-    service_executor_.reset();
-    air_pump_service_.reset();
-    service_node_.reset();
-}
 }  // namespace real_arm_hardware
 
 PLUGINLIB_EXPORT_CLASS(real_arm_hardware::RealArmControl, hardware_interface::SystemInterface)

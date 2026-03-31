@@ -27,7 +27,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="base_link.STL" />
+          filename="package://robotic_arm/base_link.STL" />
       </geometry>
       <material
         name="">
@@ -41,7 +41,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="base_link.STL" />
+          filename="package://robotic_arm/base_link.STL" />
       </geometry>
     </collision>
   </link>
@@ -67,7 +67,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link1.STL" />
+          filename="package://robotic_arm/link1.STL" />
       </geometry>
       <material
         name="">
@@ -81,7 +81,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link1.STL" />
+          filename="package://robotic_arm/link1.STL" />
       </geometry>
     </collision>
   </link>
@@ -125,7 +125,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link2.STL" />
+          filename="package://robotic_arm/link2.STL" />
       </geometry>
       <material
         name="">
@@ -139,7 +139,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link2.STL" />
+          filename="package://robotic_arm/link2.STL" />
       </geometry>
     </collision>
   </link>
@@ -183,7 +183,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link3.STL" />
+          filename="package://robotic_arm/link3.STL" />
       </geometry>
       <material
         name="">
@@ -197,7 +197,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link3.STL" />
+          filename="package://robotic_arm/link3.STL" />
       </geometry>
     </collision>
   </link>
@@ -241,7 +241,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link4.STL" />
+          filename="package://robotic_arm/link4.STL" />
       </geometry>
       <material
         name="">
@@ -255,7 +255,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link4.STL" />
+          filename="package://robotic_arm/link4.STL" />
       </geometry>
     </collision>
   </link>
@@ -299,7 +299,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link5.STL" />
+          filename="package://robotic_arm/link5.STL" />
       </geometry>
       <material
         name="">
@@ -313,7 +313,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link5.STL" />
+          filename="package://robotic_arm/link5.STL" />
       </geometry>
     </collision>
   </link>
@@ -357,7 +357,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link6.STL" />
+          filename="package://robotic_arm/link6.STL" />
       </geometry>
       <material
         name="">
@@ -371,7 +371,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="link6.STL" />
+          filename="package://robotic_arm/link6.STL" />
       </geometry>
     </collision>
   </link>
@@ -380,7 +380,7 @@
     type="revolute">
     <origin
       xyz="0.073796 0.0036822 8.8922E-05"
-      rpy="0 -1.5708 0" />
+      rpy="0 -1.5708 3.14" />
     <parent
       link="link5" />
     <child

@@ -3,12 +3,26 @@ from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
+import yaml
+import sys
 import os
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from _moveit_config import build_moveit_config
+
+
+def load_yaml(file_path):
+    with open(file_path, "r", encoding="utf-8") as file:
+        return yaml.safe_load(file)
 
 
 def generate_launch_description():
     moveit_config_dir = get_package_share_directory("robotic_config")
     launch_dir = os.path.join(moveit_config_dir, "launch")
+    moveit_config = build_moveit_config("mujoco")
+    servo_config = os.path.join(moveit_config_dir, "config", "moveit_servo.yaml")
+    servo_params = {"moveit_servo": load_yaml(servo_config)}
 
     static_tf = Node(
         package="tf2_ros",
@@ -32,17 +46,17 @@ def generate_launch_description():
 
     robot_description_launch_py = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(robot_description_launch),
-        launch_arguments={"backend": "mujoco"}.items(),
+        launch_arguments={"backend": "mujoco", "use_sim_time": "true"}.items(),
     )
 
     move_group = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(move_group_launch),
-        launch_arguments={"backend": "mujoco"}.items(),
+        launch_arguments={"backend": "mujoco", "use_sim_time": "true"}.items(),
     )
 
     rviz_show = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(rviz_launch),
-        launch_arguments={"backend": "mujoco"}.items(),
+        launch_arguments={"backend": "mujoco", "use_sim_time": "true"}.items(),
     )
 
     start_ros_control = IncludeLaunchDescription(
@@ -50,6 +64,18 @@ def generate_launch_description():
         launch_arguments={"backend": "mujoco"}.items(),
     )
 
+    robotic_task = Node(
+        package="robotic_task",
+        executable="robotic_task",
+        name="robotic_task",
+        output="both",
+        parameters=[
+            moveit_config.to_dict(),
+            servo_params,
+            {"use_sim_time": True},
+        ],
+    )
+
     return LaunchDescription(
-        [static_tf, robot_description_launch_py, move_group, rviz_show, start_ros_control]
+        [static_tf, robot_description_launch_py, move_group, rviz_show, start_ros_control, robotic_task]
     )
