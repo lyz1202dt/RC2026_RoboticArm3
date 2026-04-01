@@ -1,7 +1,9 @@
 #include "robot.hpp"
 #include "task/base_task.hpp"
 #include "task/idel.hpp"
+#include "task/servo_demo.hpp"
 #include <chrono>
+#include <thread>
 #include <utility>
 
 Robot::Robot(const rclcpp::Node::SharedPtr node) {
@@ -49,6 +51,16 @@ Robot::Robot(const rclcpp::Node::SharedPtr node) {
         if (servo_parameters_) {
             // 创建 Servo 实例
             servo_ = std::make_shared<moveit_servo::Servo>(node, servo_parameters_, planning_scene_monitor_);
+            servo_twist_pub_ = node_->create_publisher<geometry_msgs::msg::TwistStamped>(
+                servo_parameters_->cartesian_command_in_topic, rclcpp::SystemDefaultsQoS());
+            servo_status_sub_ = node_->create_subscription<std_msgs::msg::Int8>(
+                servo_parameters_->status_topic, rclcpp::SystemDefaultsQoS(),
+                [this](const std_msgs::msg::Int8::SharedPtr msg) {
+                    std::lock_guard<std::mutex> lock(servo_status_mutex_);
+                    latest_servo_status_ = static_cast<moveit_servo::StatusCode>(msg->data);
+                    latest_servo_status_stamp_ = node_->now();
+                    servo_status_received_ = true;
+                });
             servo_->start();
 
             RCLCPP_INFO(node->get_logger(), "MoveIt Servo 初始化完成");
@@ -60,6 +72,7 @@ Robot::Robot(const rclcpp::Node::SharedPtr node) {
     }
 
     register_task(std::make_shared<IdelTask>(this,"idel"));
+    register_task(std::make_shared<ServoDemoTask>(this,"servo_demo"));
     init_task_manager("idel");
     arm_task_thread = std::make_shared<std::thread>([this]() {  //任务调度线程
         while (rclcpp::ok()) {
@@ -301,4 +314,71 @@ bool Robot::set_air_pump(const bool enable){
     air_pump_command_pub_->publish(command_msg);
     RCLCPP_INFO(node_->get_logger(), "气泵已设置为: %s", enable ? "开启" : "关闭");
     return true;
+}
+
+int Robot::set_arm_velocity(const geometry_msgs::msg::Twist &velocity)
+{
+    if (!node_ || !servo_ || !servo_parameters_ || !servo_twist_pub_ || !servo_status_sub_) {
+        if (node_) {
+            RCLCPP_ERROR(node_->get_logger(), "MoveIt Servo 控制链路存在空指针");
+        }
+        return -2;
+    }
+
+    geometry_msgs::msg::TransformStamped command_frame_transform;
+    geometry_msgs::msg::TransformStamped ee_frame_transform;
+    if (!servo_->getCommandFrameTransform(command_frame_transform) || !servo_->getEEFrameTransform(ee_frame_transform)) {
+        RCLCPP_WARN(node_->get_logger(), "MoveIt Servo 变换数据暂不可用");
+        return -2;
+    }
+
+    geometry_msgs::msg::TwistStamped twist_command;
+    twist_command.header.stamp = node_->now();
+    twist_command.header.frame_id = servo_parameters_->robot_link_command_frame;
+    twist_command.twist = velocity;
+    servo_twist_pub_->publish(twist_command);
+
+    const auto wait_deadline =
+        std::chrono::steady_clock::now() + std::chrono::duration<double>(servo_parameters_->publish_period * 2.0);
+
+    moveit_servo::StatusCode status = moveit_servo::StatusCode::INVALID;
+    bool has_status = false;
+
+    while (std::chrono::steady_clock::now() < wait_deadline) {
+        {
+            std::lock_guard<std::mutex> lock(servo_status_mutex_);
+            has_status = servo_status_received_ && latest_servo_status_stamp_ >= twist_command.header.stamp;
+            if (has_status) {
+                status = latest_servo_status_;
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    if (!has_status) {
+        std::lock_guard<std::mutex> lock(servo_status_mutex_);
+        has_status = servo_status_received_;
+        status = latest_servo_status_;
+    }
+
+    if (!has_status) {
+        RCLCPP_WARN(node_->get_logger(), "尚未收到 MoveIt Servo 状态，无法判断控制结果");
+        return -2;
+    }
+
+    switch (status) {
+        case moveit_servo::StatusCode::NO_WARNING:
+            return 0;
+        case moveit_servo::StatusCode::DECELERATE_FOR_APPROACHING_SINGULARITY:
+        case moveit_servo::StatusCode::DECELERATE_FOR_LEAVING_SINGULARITY:
+            return 1;
+        case moveit_servo::StatusCode::HALT_FOR_SINGULARITY:
+        case moveit_servo::StatusCode::DECELERATE_FOR_COLLISION:
+        case moveit_servo::StatusCode::HALT_FOR_COLLISION:
+        case moveit_servo::StatusCode::JOINT_BOUND:
+        case moveit_servo::StatusCode::INVALID:
+        default:
+            return -1;
+    }
 }

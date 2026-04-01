@@ -2,13 +2,14 @@
 
 #include "task/base_task.hpp"
 
-class IdelTask :public BaseTask{
+class ServoDemoTask : public BaseTask {
 public:
-    IdelTask(Robot* context,const std::string name);
-    ~IdelTask() override;
+    ServoDemoTask(Robot* context, const std::string name);
+    ~ServoDemoTask() override;
     std::string process(const std::string last_task_name) override;
 
 private:
     void declare_parameters_if_needed();
+    void reset_command_parameters();
     bool parameters_declared_{false};
 };

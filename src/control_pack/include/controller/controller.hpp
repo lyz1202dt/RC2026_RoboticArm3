@@ -24,7 +24,6 @@
 #include <rclcpp/subscription.hpp>
 #include <unordered_map>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -55,12 +54,13 @@ private:
     std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>> activate_goal_handle_;
     control_msgs::action::FollowJointTrajectory::Feedback::SharedPtr feedback_msg;
     control_msgs::action::FollowJointTrajectory::Result::SharedPtr result_msg;
-    trajectory_msgs::msg::JointTrajectory current_trajectory_;
-    size_t trajectory_index_{0};
-    rclcpp::Time trajectory_start_time;
+    trajectory_msgs::msg::JointTrajectory offline_trajectory_;
+    size_t offline_trajectory_index_{0};
+    rclcpp::Time offline_trajectory_start_time;
+    trajectory_msgs::msg::JointTrajectory servo_trajectory_;
+    size_t servo_trajectory_index_{0};
+    rclcpp::Time servo_trajectory_start_time;
     rclcpp::Time last_offline_finish_time_{0, 0, RCL_ROS_TIME};
-    mutable std::mutex trajectory_mutex_;
-
     std::vector<std::string> joint_names_;
     std::vector<std::string> command_interface_types_;
     std::vector<std::string> state_interface_types_;
@@ -98,8 +98,12 @@ private:
     bool servo_mode{false};
     bool cancle_execut{false};
     bool finished_execut{false};
+    bool servo_entry_debug_logged_{false};
 
-    trajectory_msgs::msg::JointTrajectoryPoint interpolate_bezier_point(const rclcpp::Duration &elapsed) const;
+    trajectory_msgs::msg::JointTrajectoryPoint interpolate_bezier_point(
+        const trajectory_msgs::msg::JointTrajectory& trajectory,
+        size_t trajectory_index,
+        const rclcpp::Duration &elapsed) const;
     static double duration_to_seconds(const builtin_interfaces::msg::Duration &duration_msg);
     static double cubic_bezier(double p0, double p1, double p2, double p3, double t);
     static double cubic_bezier_first_derivative(double p0, double p1, double p2, double p3, double t);

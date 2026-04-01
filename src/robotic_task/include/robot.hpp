@@ -4,18 +4,23 @@
 #include <condition_variable>
 #include <control_msgs/msg/dynamic_interface_group_values.hpp>
 #include <functional>
+#include <geometry_msgs/msg/detail/twist__struct.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <memory>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 #include <moveit_servo/servo.h>
 #include <moveit_servo/servo_parameters.h>
+#include <moveit_servo/status_codes.h>
+#include <geometry_msgs/msg/twist.hpp>
 #include <mutex>
 #include <rclcpp/parameter_client.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <robot_interfaces/action/catch.hpp>
+#include <std_msgs/msg/int8.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <thread>
@@ -69,12 +74,12 @@ public:
 
     Robot(const rclcpp::Node::SharedPtr node);
     ~Robot();
-
+    
     bool wait_for_idle_signal(const std::chrono::milliseconds timeout);
     bool take_pending_task(PendingTaskRequest& request);
     void finish_current_task(const std::shared_ptr<CatchGoalHandle>& goal_handle, bool success, const std::string& reason);
+    int set_arm_velocity(const geometry_msgs::msg::Twist &velocity);
 
-private:
     rclcpp_action::Server<Catch>::SharedPtr task_handle_server;
     rclcpp_action::GoalResponse
         on_handle_goal(const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CatchGoal> goal);
@@ -98,6 +103,12 @@ private:
     // MoveIt Servo
     std::shared_ptr<moveit_servo::Servo> servo_;
     moveit_servo::ServoParameters::SharedConstPtr servo_parameters_;
+    rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr servo_twist_pub_;
+    rclcpp::Subscription<std_msgs::msg::Int8>::SharedPtr servo_status_sub_;
+    std::mutex servo_status_mutex_;
+    moveit_servo::StatusCode latest_servo_status_{moveit_servo::StatusCode::INVALID};
+    rclcpp::Time latest_servo_status_stamp_{0, 0, RCL_ROS_TIME};
+    bool servo_status_received_{false};
 
     // 初始化任务调度器，执行任务，切换任务
     void porcess_task();
@@ -118,6 +129,7 @@ private:
     geometry_msgs::msg::Pose expected_target_pose_;
     std::shared_ptr<CatchGoalHandle> pending_goal_handle_;
     SimpleSemaphore idle_task_signal_;
+
 
     // 工具函数
     bool set_air_pump(const bool enable);
