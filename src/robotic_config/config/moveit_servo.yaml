@@ -12,7 +12,7 @@ publish_period: 0.034
 command_out_type: trajectory_msgs/JointTrajectory
 publish_joint_positions: true
 publish_joint_velocities: true
-publish_joint_accelerations: false
+publish_joint_accelerations: true
 
 joint_topic: /joint_states
 smoothing_filter_plugin_name: online_signal_smoothing::ButterworthFilterPlugin
