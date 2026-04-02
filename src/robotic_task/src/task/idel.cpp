@@ -33,6 +33,7 @@ std::string IdelTask::process(const std::string last_task_name)
         if (next_task == "servo_demo") {
             node->set_parameter(rclcpp::Parameter("idel.next_task", "idel"));
             RCLCPP_INFO(node->get_logger(), "idel 切换到 servo_demo 调试状态");
+            robot->servo_->start();
             return "servo_demo";
         }
     }

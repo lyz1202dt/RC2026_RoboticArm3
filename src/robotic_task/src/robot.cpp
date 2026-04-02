@@ -61,8 +61,6 @@ Robot::Robot(const rclcpp::Node::SharedPtr node) {
                     latest_servo_status_stamp_ = node_->now();
                     servo_status_received_ = true;
                 });
-            servo_->start();
-
             RCLCPP_INFO(node->get_logger(), "MoveIt Servo 初始化完成");
         } else {
             RCLCPP_WARN(node->get_logger(), "加载 Servo 参数失败");
