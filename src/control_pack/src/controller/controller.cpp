@@ -79,7 +79,7 @@ controller_interface::CallbackReturn TrajectoryController::on_configure(const rc
         state_interface_index_map_[state_interface_types_[i]] = i;
     }
 
-    // TODO:加载并解析URDF
+
     RCLCPP_INFO(get_node()->get_logger(), "尝试解析URDF");
     robot_description_param_ = std::make_shared<rclcpp::SyncParametersClient>(param_node, "/robot_state_publisher");
 
@@ -89,7 +89,7 @@ controller_interface::CallbackReturn TrajectoryController::on_configure(const rc
         RCLCPP_ERROR(get_node()->get_logger(), "无法读取URDF文件，不能进行动力学计算");
         return controller_interface::CallbackReturn::ERROR;
     }
-
+    
     kdl_parser::treeFromString(urdf_xml, tree);
     tree.getChain("base_link", "link6", chain);
 
