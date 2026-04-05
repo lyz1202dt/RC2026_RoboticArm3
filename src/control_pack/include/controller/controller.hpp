@@ -22,8 +22,10 @@
 #include <rclcpp/duration.hpp>
 #include <builtin_interfaces/msg/duration.hpp>
 #include <rclcpp/subscription.hpp>
+#include <cstdint>
 #include <unordered_map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -91,7 +93,6 @@ private:
         const trajectory_msgs::msg::JointTrajectory& trajectory,
         TrajectorySource source,
         const std::shared_ptr<rclcpp_action::ServerGoalHandle<control_msgs::action::FollowJointTrajectory>>& goal_handle = nullptr);
-    void finish_active_trajectory(bool succeeded, const std::string& message);
     bool is_valid_trajectory(const trajectory_msgs::msg::JointTrajectory& trajectory, const char* source_name) const;
 
     bool is_execut_trajectory{false};
@@ -99,6 +100,9 @@ private:
     bool cancle_execut{false};
     bool finished_execut{false};
     bool servo_entry_debug_logged_{false};
+    mutable std::mutex trajectory_mutex_;
+    uint64_t active_trajectory_token_{0};
+    uint64_t next_trajectory_token_{1};
 
     trajectory_msgs::msg::JointTrajectoryPoint interpolate_bezier_point(
         const trajectory_msgs::msg::JointTrajectory& trajectory,
@@ -112,6 +116,7 @@ private:
     size_t state_interface_offset(size_t joint_index, const std::string &interface_name) const;
     double read_state_value(size_t joint_index, const std::string &interface_name) const;
     void write_command_value(size_t joint_index, const std::string &interface_name, double value);
+    void finish_active_trajectory(bool succeeded, const std::string& message, uint64_t expected_token);
 
     Eigen::Vector<double, 6> dynamicCalc();
 };
