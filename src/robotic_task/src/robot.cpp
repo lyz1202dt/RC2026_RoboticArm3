@@ -85,6 +85,34 @@ Robot::~Robot() {
         arm_task_thread->join();
 }
 
+bool Robot::switch_motion_mode(const MotionMode target_mode) {
+    std::lock_guard<std::mutex> lock(motion_mode_mutex_);
+    const auto motion_mode_to_cstr = [](const MotionMode mode) -> const char* {
+        switch (mode) {
+        case MotionMode::IDEL: return "IDEL";
+        case MotionMode::SERVO: return "SERVO";
+        case MotionMode::TRAJECTORY_EXECUTION: return "TRAJECTORY_EXECUTION";
+        default: return "UNKNOWN";
+        }
+    };
+
+    if (target_mode!= MotionMode::IDEL&&motion_mode_ != MotionMode::IDEL) {
+        RCLCPP_WARN(
+            node_->get_logger(), "模式切换被拒绝: 当前模式 [%s]，仅允许从 IDEL 进入 [%s]", motion_mode_to_cstr(motion_mode_),
+            motion_mode_to_cstr(target_mode));
+        return false;
+    }
+
+    motion_mode_ = target_mode;
+    RCLCPP_INFO(node_->get_logger(), "运动模式切换: [IDEL] -> [%s]", motion_mode_to_cstr(target_mode));
+    return true;
+}
+
+Robot::MotionMode Robot::get_motion_mode() const {
+    std::lock_guard<std::mutex> lock(motion_mode_mutex_);
+    return motion_mode_;
+}
+
 
 rclcpp_action::GoalResponse Robot::on_handle_goal(const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CatchGoal> goal) {
     (void)uuid;
@@ -137,8 +165,23 @@ bool Robot::take_pending_task(PendingTaskRequest& request) {
     request.target_pose = expected_target_pose_;
     request.goal_handle = pending_goal_handle_;
 
+    active_task_context_.action_type = request.action_type;
+    active_task_context_.target_pose = request.target_pose;
+    active_task_context_.goal_handle = request.goal_handle;
+    has_active_task_context_         = true;
+
     goal_pending_   = false;
     task_executing_ = true;
+    return true;
+}
+
+bool Robot::get_active_task_context(ActiveTaskContext& context) const {
+    std::lock_guard<std::mutex> lock(action_state_mutex_);
+    if (!has_active_task_context_) {
+        return false;
+    }
+
+    context = active_task_context_;
     return true;
 }
 
@@ -149,7 +192,11 @@ void Robot::finish_current_task(const std::shared_ptr<CatchGoalHandle>& goal_han
 
     {
         std::lock_guard<std::mutex> lock(action_state_mutex_);
-        task_executing_ = false;
+        task_executing_          = false;
+        has_active_task_context_ = false;
+        active_task_context_.action_type = 0;
+        active_task_context_.target_pose = geometry_msgs::msg::Pose{};
+        active_task_context_.goal_handle.reset();
 
         if (pending_goal_handle_ == goal_handle) {
             pending_goal_handle_.reset();
@@ -318,6 +365,20 @@ int Robot::set_arm_velocity(const geometry_msgs::msg::Twist& velocity) {
         return -2;
     }
 
+    const MotionMode current_mode = get_motion_mode();
+    if (current_mode != MotionMode::SERVO) {
+        const char* current_mode_name = "UNKNOWN";
+        switch (current_mode) {
+        case MotionMode::IDEL: current_mode_name = "IDEL"; break;
+        case MotionMode::SERVO: current_mode_name = "SERVO"; break;
+        case MotionMode::TRAJECTORY_EXECUTION: current_mode_name = "TRAJECTORY_EXECUTION"; break;
+        default: break;
+        }
+        RCLCPP_WARN(
+            node_->get_logger(), "当前运动模式为 [%s]，拒绝执行 Servo 速度控制", current_mode_name);
+        return -2;
+    }
+
     geometry_msgs::msg::TransformStamped command_frame_transform;
     geometry_msgs::msg::TransformStamped ee_frame_transform;
     if (!servo_->getCommandFrameTransform(command_frame_transform) || !servo_->getEEFrameTransform(ee_frame_transform)) {
@@ -378,6 +439,10 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const ge
         return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
     }
 
+    if (!switch_motion_mode(MotionMode::TRAJECTORY_EXECUTION)) {
+        return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+    }
+
     if (max_retyr <= 0) {
         max_retyr = 1;
     }
@@ -401,6 +466,7 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const ge
         move_group_interface->clearPoseTargets();
         if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
             RCLCPP_INFO(node_->get_logger(), "位姿规划并执行成功");
+            switch_motion_mode(MotionMode::IDEL);
             return last_error;
         }
 
@@ -408,12 +474,17 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const ge
             node_->get_logger(), "轨迹执行失败，第 %d/%d 次尝试，错误码: %d", attempt, max_retyr, last_error.val);
     }
 
+    switch_motion_mode(MotionMode::IDEL);
     return last_error;
 }
 
 moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const std::string& pose_name, int max_retyr) {
     if (!move_group_interface) {
         RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行命名位姿规划");
+        return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+    }
+
+    if (!switch_motion_mode(MotionMode::TRAJECTORY_EXECUTION)) {
         return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
     }
 
@@ -428,6 +499,7 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const st
         const bool target_set = move_group_interface->setNamedTarget(pose_name);
         if (!target_set) {
             RCLCPP_ERROR(node_->get_logger(), "设置命名位姿 [%s] 失败", pose_name.c_str());
+            switch_motion_mode(MotionMode::IDEL);
             return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::INVALID_GOAL_CONSTRAINTS);
         }
 
@@ -443,6 +515,7 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const st
         last_error = move_group_interface->execute(plan);
         if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
             RCLCPP_INFO(node_->get_logger(), "命名位姿 [%s] 规划并执行成功", pose_name.c_str());
+            switch_motion_mode(MotionMode::IDEL);
             return last_error;
         }
 
@@ -451,12 +524,17 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const st
             max_retyr, last_error.val);
     }
 
+    switch_motion_mode(MotionMode::IDEL);
     return last_error;
 }
 
 moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(const geometry_msgs::msg::Pose& target_pose, int max_retry) {
     if (!move_group_interface) {
         RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行笛卡尔路径规划");
+        return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+    }
+
+    if (!switch_motion_mode(MotionMode::TRAJECTORY_EXECUTION)) {
         return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
     }
 
@@ -489,6 +567,7 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(con
         last_error = move_group_interface->execute(plan);
         if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
             RCLCPP_INFO(node_->get_logger(), "笛卡尔路径规划并执行成功");
+            switch_motion_mode(MotionMode::IDEL);
             return last_error;
         }
 
@@ -496,5 +575,6 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(con
             node_->get_logger(), "笛卡尔轨迹执行失败，第 %d/%d 次尝试，错误码: %d", attempt, max_retry, last_error.val);
     }
 
+    switch_motion_mode(MotionMode::IDEL);
     return last_error;
 }

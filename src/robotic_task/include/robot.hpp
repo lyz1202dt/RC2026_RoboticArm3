@@ -34,6 +34,12 @@ public:
     using CatchGoal       = Catch::Goal;
     using CatchGoalHandle = rclcpp_action::ServerGoalHandle<Catch>;
 
+    enum class MotionMode {
+        IDEL = 0,
+        SERVO,
+        TRAJECTORY_EXECUTION,
+    };
+
     class SimpleSemaphore {
     public:
         explicit SimpleSemaphore(std::size_t initial_count = 0)
@@ -67,6 +73,12 @@ public:
         std::shared_ptr<CatchGoalHandle> goal_handle;
     };
 
+    struct ActiveTaskContext {
+        int32_t action_type{0};
+        geometry_msgs::msg::Pose target_pose;
+        std::shared_ptr<CatchGoalHandle> goal_handle;
+    };
+
     typedef enum {
         ROBOTIC_ARM_TASK_MOVE         = 1, // 移动到某个位姿
         ROBOTIC_ARM_TASK_CATCH_TARGET = 2, // 捕获处于某个坐标下的KFS
@@ -76,10 +88,25 @@ public:
     Robot(const rclcpp::Node::SharedPtr node);
     ~Robot();
 
+    //等待机械臂进入空闲状态，返回true表示成功进入空闲状态，false表示等待超时
     bool wait_for_idle_signal(const std::chrono::milliseconds timeout);
+
+    //获取当前任务请求，返回true表示成功获取，false表示当前没有待执行任务
     bool take_pending_task(PendingTaskRequest& request);
+
+    //获取当前正在执行的任务上下文，返回true表示有正在执行的任务并成功获取上下文，false表示当前没有正在执行的任务
+    bool get_active_task_context(ActiveTaskContext& context) const;
+
+    //结束当前任务，success表示任务是否成功完成，reason用于描述任务完成的原因或结果
     void finish_current_task(const std::shared_ptr<CatchGoalHandle>& goal_handle, bool success, const std::string& reason);
+
+    //设置机械臂笛卡尔速度，返回0表示正常，1表示接近奇异点限速，-1表示碰撞/奇异/越界，-2表示Servo数据不可用
     int set_arm_velocity(const geometry_msgs::msg::Twist& velocity);
+
+    //请求切换运动模式，成功返回true，失败返回false
+    bool switch_motion_mode(MotionMode target_mode);
+
+    MotionMode get_motion_mode() const;
 
     rclcpp_action::Server<Catch>::SharedPtr task_handle_server;
     rclcpp_action::GoalResponse on_handle_goal(const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CatchGoal> goal);
@@ -121,13 +148,17 @@ public:
     std::string last_task_name_;
     bool task_manager_initialized_{false};
 
-    std::mutex action_state_mutex_;
+    mutable std::mutex action_state_mutex_;
     bool task_executing_{false};
     bool goal_pending_{false};
     int32_t expected_action_type_{0};
     geometry_msgs::msg::Pose expected_target_pose_;
     std::shared_ptr<CatchGoalHandle> pending_goal_handle_;
+    bool has_active_task_context_{false};
+    ActiveTaskContext active_task_context_;
     SimpleSemaphore idle_task_signal_;
+    mutable std::mutex motion_mode_mutex_;
+    MotionMode motion_mode_{MotionMode::IDEL};
 
 
     // 工具函数

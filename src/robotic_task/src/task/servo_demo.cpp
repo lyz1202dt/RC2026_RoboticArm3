@@ -53,13 +53,10 @@ std::string ServoDemoTask::process(const std::string last_task_name)
     declare_parameters_if_needed();
 
     auto node = robot->node_;
-    if (!node) {
-        return "idel";
-    }
-
     if (node->get_parameter("servo_demo.exit_to_idel").as_bool()) {
         geometry_msgs::msg::Twist stop_velocity;
         (void)robot->set_arm_velocity(stop_velocity);
+        robot->switch_motion_mode(Robot::MotionMode::IDEL);
         reset_command_parameters();
         RCLCPP_INFO(node->get_logger(), "servo_demo 收到退出请求，返回 idel");
         return "idel";

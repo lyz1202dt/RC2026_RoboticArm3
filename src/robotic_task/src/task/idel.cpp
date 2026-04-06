@@ -32,6 +32,11 @@ std::string IdelTask::process(const std::string last_task_name)
         const std::string next_task = node->get_parameter("idel.next_task").as_string();
         if (next_task == "servo_demo") {
             node->set_parameter(rclcpp::Parameter("idel.next_task", "idel"));
+            if (!robot->switch_motion_mode(Robot::MotionMode::SERVO)) {
+                RCLCPP_WARN(node->get_logger(), "idel 无法切入 servo_demo，因为当前不处于 IDEL 模式");
+                return "idel";
+            }
+
             RCLCPP_INFO(node->get_logger(), "idel 切换到 servo_demo 调试状态");
             robot->servo_->start();
             return "servo_demo";
