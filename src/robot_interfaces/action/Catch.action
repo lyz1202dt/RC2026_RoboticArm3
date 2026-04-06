@@ -1,6 +1,7 @@
 # Goal
 int32 action_type     #动作类型
 geometry_msgs/Pose target_pose
+string pose_name
 ---
 # Result
 string reason       #失败原因
