@@ -54,9 +54,13 @@ std::string IdelTask::process(const std::string last_task_name)
 
     switch (request.action_type) {
         case Robot::ROBOTIC_ARM_TASK_MOVE:
+            robot->finish_current_task(request.goal_handle, false, "移动任务分支尚未实现");
+            break;
         case Robot::ROBOTIC_ARM_TASK_CATCH_TARGET:
+            RCLCPP_INFO(node->get_logger(), "idel 分发到 catch_kfs 抓取任务");
+            return "catch_kfs";
         case Robot::ROBOTIC_ARM_TASK_PLACE_TARGET:
-            robot->finish_current_task(request.goal_handle, false, "任务已进入idel分发框架，但具体子任务尚未实现");
+            robot->finish_current_task(request.goal_handle, false, "放置任务分支尚未实现");
             break;
         default:
             robot->finish_current_task(request.goal_handle, false, "未知的 action_type，无法分发任务");

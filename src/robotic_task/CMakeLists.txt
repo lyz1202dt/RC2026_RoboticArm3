@@ -40,6 +40,7 @@ endif()
 add_executable(robotic_task
   src/main.cpp
   src/robot.cpp
+  src/task/catch_kfs.cpp
   src/task/idel.cpp
   src/task/servo_demo.cpp
 )

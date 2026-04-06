@@ -1,5 +1,5 @@
 # Goal
-int32 action_type     #抓取到R2上还是从R2上抓取放到别的位置
+int32 action_type     #动作类型
 geometry_msgs/Pose target_pose
 ---
 # Result

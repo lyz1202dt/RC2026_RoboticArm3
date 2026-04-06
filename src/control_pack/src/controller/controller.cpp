@@ -367,15 +367,15 @@ void TrajectoryController::handle_online_trajectory(const trajectory_msgs::msg::
         return;
     }
 
-    if (log_servo_entry) {
-        RCLCPP_WARN(
-            this->get_node()->get_logger(),
-            "首次进入伺服模式的在线轨迹: first_point.positions=%s, first_point.time_from_start=(sec=%d, nanosec=%u), current_joint_positions=%s",
-            first_point_positions.c_str(),
-            first_point_time_from_start.sec,
-            first_point_time_from_start.nanosec,
-            current_joint_positions.c_str());
-    }
+    // if (log_servo_entry) {
+    //     RCLCPP_WARN(
+    //         this->get_node()->get_logger(),
+    //         "首次进入伺服模式的在线轨迹: first_point.positions=%s, first_point.time_from_start=(sec=%d, nanosec=%u), current_joint_positions=%s",
+    //         first_point_positions.c_str(),
+    //         first_point_time_from_start.sec,
+    //         first_point_time_from_start.nanosec,
+    //         current_joint_positions.c_str());
+    // }
 
     start_trajectory_execution(*msg, TrajectorySource::OnlineServo);
 }
@@ -421,11 +421,11 @@ void TrajectoryController::start_trajectory_execution(
         }
     }
 
-    RCLCPP_INFO(
-        this->get_node()->get_logger(),
-        "开始执行%s轨迹，轨迹点数: %zu",
-        local_servo_mode ? "在线" : "离线",
-        trajectory.points.size());
+    // RCLCPP_INFO(
+    //     this->get_node()->get_logger(),
+    //     "开始执行%s轨迹，轨迹点数: %zu",
+    //     local_servo_mode ? "在线" : "离线",
+    //     trajectory.points.size());
 }
 
 void TrajectoryController::finish_active_trajectory(bool succeeded, const std::string& message, uint64_t expected_token) {

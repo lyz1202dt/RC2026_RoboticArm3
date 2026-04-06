@@ -1,5 +1,6 @@
 #include "robot.hpp"
 #include "task/base_task.hpp"
+#include "task/catch_kfs.hpp"
 #include "task/idel.hpp"
 #include "task/servo_demo.hpp"
 #include <chrono>
@@ -71,6 +72,7 @@ Robot::Robot(const rclcpp::Node::SharedPtr node) {
     }
 
     register_task(std::make_shared<IdelTask>(this, "idel"));
+    register_task(std::make_shared<CatchKFS>(this, "catch_kfs"));
     register_task(std::make_shared<ServoDemoTask>(this, "servo_demo"));
     init_task_manager("idel");
     arm_task_thread = std::make_shared<std::thread>([this]() { // 任务调度线程
@@ -103,6 +105,10 @@ bool Robot::switch_motion_mode(const MotionMode target_mode) {
         return false;
     }
 
+    if(target_mode == MotionMode::SERVO)
+    {
+        servo_->start();
+    }
     motion_mode_ = target_mode;
     RCLCPP_INFO(node_->get_logger(), "运动模式切换: [IDEL] -> [%s]", motion_mode_to_cstr(target_mode));
     return true;
