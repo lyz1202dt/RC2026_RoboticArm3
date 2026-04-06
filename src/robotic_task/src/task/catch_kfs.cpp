@@ -150,10 +150,21 @@ std::string CatchKFS::process(const std::string last_task_name) {
         return "idel";
     }
 
-    bool exit_servo       = false;
-    auto servo_start_time = node->get_clock()->now();
+    bool exit_servo         = false;
+    auto servo_start_time   = node->get_clock()->now();
+    bool target_tf_reliable = true;
     while (!exit_servo) {
-        get_target_pose_from_tf(target_pose);
+
+        //如果TF可信的话再去进行TF变换
+        if (target_tf_reliable) {
+            get_target_pose_from_tf(target_pose);
+        }
+
+        double distance =
+            std::sqrt(std::pow(target_pose.position.x, 2) + std::pow(target_pose.position.y, 2) + std::pow(target_pose.position.z, 2));
+        if (distance < 0.3) {   //距离一旦过近，TF就不再可信，因为视觉识别不再可靠
+            target_tf_reliable = false;
+        }
 
         auto current_pose = robot->move_group_interface->getCurrentPose().pose;
         geometry_msgs::msg::Twist servo_velocity;
@@ -215,7 +226,7 @@ std::string CatchKFS::process(const std::string last_task_name) {
     arm_final_pose.orientation.z = q.getZ();
     arm_final_pose.orientation.w = q.getW();
     arm_final_pose.position.x += 0.05;
-    move_result                  = robot->plan_and_execut_from_current_state_cart(arm_final_pose);
+    move_result = robot->plan_and_execut_from_current_state_cart(arm_final_pose);
     if (move_result != moveit::core::MoveItErrorCode::SUCCESS) {
         robot->finish_current_task(goal_handle, false, "补推失败");
         return "idel";
