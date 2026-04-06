@@ -1,0 +1,14 @@
+Starting >>> robot_interfaces
+Starting >>> robotic_arm
+Starting >>> mujoco_ros2_control
+Finished <<< robotic_arm [0.05s]
+Finished <<< robot_interfaces [0.27s]
+Finished <<< mujoco_ros2_control [0.30s]
+Starting >>> robotic_task
+Starting >>> control_pack
+Finished <<< control_pack [0.06s]
+Finished <<< robotic_task [0.07s]
+Starting >>> robotic_config
+Finished <<< robotic_config [0.03s]
+
+Summary: 6 packages finished [0.59s]
