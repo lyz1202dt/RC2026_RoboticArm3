@@ -6,6 +6,7 @@
 #include <functional>
 #include <geometry_msgs/msg/detail/twist__struct.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <memory>
 #include <moveit/move_group_interface/move_group_interface.h>
@@ -14,7 +15,6 @@
 #include <moveit_servo/servo.h>
 #include <moveit_servo/servo_parameters.h>
 #include <moveit_servo/status_codes.h>
-#include <geometry_msgs/msg/twist.hpp>
 #include <mutex>
 #include <rclcpp/parameter_client.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -30,13 +30,14 @@ class BaseTask;
 
 class Robot {
 public:
-    using Catch = robot_interfaces::action::Catch;
-    using CatchGoal = Catch::Goal;
+    using Catch           = robot_interfaces::action::Catch;
+    using CatchGoal       = Catch::Goal;
     using CatchGoalHandle = rclcpp_action::ServerGoalHandle<Catch>;
 
     class SimpleSemaphore {
     public:
-        explicit SimpleSemaphore(std::size_t initial_count = 0) : count_(initial_count) {}
+        explicit SimpleSemaphore(std::size_t initial_count = 0)
+            : count_(initial_count) {}
 
         void release() {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -74,17 +75,15 @@ public:
 
     Robot(const rclcpp::Node::SharedPtr node);
     ~Robot();
-    
+
     bool wait_for_idle_signal(const std::chrono::milliseconds timeout);
     bool take_pending_task(PendingTaskRequest& request);
     void finish_current_task(const std::shared_ptr<CatchGoalHandle>& goal_handle, bool success, const std::string& reason);
-    int set_arm_velocity(const geometry_msgs::msg::Twist &velocity);
+    int set_arm_velocity(const geometry_msgs::msg::Twist& velocity);
 
     rclcpp_action::Server<Catch>::SharedPtr task_handle_server;
-    rclcpp_action::GoalResponse
-        on_handle_goal(const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CatchGoal> goal);
-    rclcpp_action::CancelResponse
-        on_cancel_goal(const std::shared_ptr<CatchGoalHandle> goal_handle);
+    rclcpp_action::GoalResponse on_handle_goal(const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CatchGoal> goal);
+    rclcpp_action::CancelResponse on_cancel_goal(const std::shared_ptr<CatchGoalHandle> goal_handle);
     void on_handle_accepted(const std::shared_ptr<CatchGoalHandle> goal_handle);
 
 
@@ -132,5 +131,15 @@ public:
 
 
     // 工具函数
+
+    //设置气泵状态
     bool set_air_pump(const bool enable);
+
+    //机械臂轨迹离线规划和执行
+    //从当前位置通过关节空间规划到目标位姿
+    moveit::core::MoveItErrorCode plan_and_execut_from_current_state(const geometry_msgs::msg::Pose& target_pose, int max_retyr = 3);
+    //从当前位置通过关节空间规划到目标位姿（目标位姿以预设的命名方式存储在MoveIt中）
+    moveit::core::MoveItErrorCode plan_and_execut_from_current_state(const std::string& pose_name, int max_retyr = 3);
+    //从当前位置通过笛卡尔空间插值的方式规划到目标位姿
+    moveit::core::MoveItErrorCode plan_and_execut_from_current_state_cart(const geometry_msgs::msg::Pose& target_pose, int max_retry = 3);
 };

@@ -3,13 +3,15 @@
 #include "task/idel.hpp"
 #include "task/servo_demo.hpp"
 #include <chrono>
+#include <moveit_msgs/msg/move_it_error_codes.hpp>
+#include <moveit_msgs/msg/robot_trajectory.hpp>
 #include <thread>
 #include <utility>
 
 Robot::Robot(const rclcpp::Node::SharedPtr node) {
     using namespace std::chrono_literals;
 
-    node_ = node;
+    node_                 = node;
     air_pump_command_pub_ = node_->create_publisher<control_msgs::msg::DynamicInterfaceGroupValues>(
         "/suction_controller/commands", rclcpp::SystemDefaultsQoS());
 
@@ -50,16 +52,15 @@ Robot::Robot(const rclcpp::Node::SharedPtr node) {
 
         if (servo_parameters_) {
             // 创建 Servo 实例
-            servo_ = std::make_shared<moveit_servo::Servo>(node, servo_parameters_, planning_scene_monitor_);
+            servo_           = std::make_shared<moveit_servo::Servo>(node, servo_parameters_, planning_scene_monitor_);
             servo_twist_pub_ = node_->create_publisher<geometry_msgs::msg::TwistStamped>(
                 servo_parameters_->cartesian_command_in_topic, rclcpp::SystemDefaultsQoS());
             servo_status_sub_ = node_->create_subscription<std_msgs::msg::Int8>(
-                servo_parameters_->status_topic, rclcpp::SystemDefaultsQoS(),
-                [this](const std_msgs::msg::Int8::SharedPtr msg) {
+                servo_parameters_->status_topic, rclcpp::SystemDefaultsQoS(), [this](const std_msgs::msg::Int8::SharedPtr msg) {
                     std::lock_guard<std::mutex> lock(servo_status_mutex_);
-                    latest_servo_status_ = static_cast<moveit_servo::StatusCode>(msg->data);
+                    latest_servo_status_       = static_cast<moveit_servo::StatusCode>(msg->data);
                     latest_servo_status_stamp_ = node_->now();
-                    servo_status_received_ = true;
+                    servo_status_received_     = true;
                 });
             RCLCPP_INFO(node->get_logger(), "MoveIt Servo 初始化完成");
         } else {
@@ -69,10 +70,10 @@ Robot::Robot(const rclcpp::Node::SharedPtr node) {
         RCLCPP_ERROR(node->get_logger(), "初始化MoveIt Servo失败: %s", e.what());
     }
 
-    register_task(std::make_shared<IdelTask>(this,"idel"));
-    register_task(std::make_shared<ServoDemoTask>(this,"servo_demo"));
+    register_task(std::make_shared<IdelTask>(this, "idel"));
+    register_task(std::make_shared<ServoDemoTask>(this, "servo_demo"));
     init_task_manager("idel");
-    arm_task_thread = std::make_shared<std::thread>([this]() {  //任务调度线程
+    arm_task_thread = std::make_shared<std::thread>([this]() { // 任务调度线程
         while (rclcpp::ok()) {
             porcess_task();
         }
@@ -85,8 +86,7 @@ Robot::~Robot() {
 }
 
 
-rclcpp_action::GoalResponse
-    Robot::on_handle_goal(const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CatchGoal> goal) {
+rclcpp_action::GoalResponse Robot::on_handle_goal(const rclcpp_action::GoalUUID& uuid, std::shared_ptr<const CatchGoal> goal) {
     (void)uuid;
 
     std::lock_guard<std::mutex> lock(action_state_mutex_);
@@ -97,20 +97,16 @@ rclcpp_action::GoalResponse
 
     expected_action_type_ = goal->action_type;
     expected_target_pose_ = goal->target_pose;
-    goal_pending_ = true;
+    goal_pending_         = true;
 
-    RCLCPP_INFO(node_->get_logger(),
-                "接收到新目标: action_type=%d, target_pose=(%.3f, %.3f, %.3f)",
-                expected_action_type_,
-                expected_target_pose_.position.x,
-                expected_target_pose_.position.y,
-                expected_target_pose_.position.z);
+    RCLCPP_INFO(
+        node_->get_logger(), "接收到新目标: action_type=%d, target_pose=(%.3f, %.3f, %.3f)", expected_action_type_,
+        expected_target_pose_.position.x, expected_target_pose_.position.y, expected_target_pose_.position.z);
 
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
 
-rclcpp_action::CancelResponse
-    Robot::on_cancel_goal(const std::shared_ptr<CatchGoalHandle> goal_handle) {
+rclcpp_action::CancelResponse Robot::on_cancel_goal(const std::shared_ptr<CatchGoalHandle> goal_handle) {
     (void)goal_handle;
     return rclcpp_action::CancelResponse::ACCEPT;
 }
@@ -120,7 +116,7 @@ void Robot::on_handle_accepted(const std::shared_ptr<CatchGoalHandle> goal_handl
     {
         std::lock_guard<std::mutex> lock(action_state_mutex_);
         pending_goal_handle_ = goal_handle;
-        should_notify_idel = !task_executing_ && goal_pending_;
+        should_notify_idel   = !task_executing_ && goal_pending_;
     }
 
     if (should_notify_idel) {
@@ -129,9 +125,7 @@ void Robot::on_handle_accepted(const std::shared_ptr<CatchGoalHandle> goal_handl
     }
 }
 
-bool Robot::wait_for_idle_signal(const std::chrono::milliseconds timeout) {
-    return idle_task_signal_.try_acquire_for(timeout);
-}
+bool Robot::wait_for_idle_signal(const std::chrono::milliseconds timeout) { return idle_task_signal_.try_acquire_for(timeout); }
 
 bool Robot::take_pending_task(PendingTaskRequest& request) {
     std::lock_guard<std::mutex> lock(action_state_mutex_);
@@ -143,14 +137,14 @@ bool Robot::take_pending_task(PendingTaskRequest& request) {
     request.target_pose = expected_target_pose_;
     request.goal_handle = pending_goal_handle_;
 
-    goal_pending_ = false;
+    goal_pending_   = false;
     task_executing_ = true;
     return true;
 }
 
 void Robot::finish_current_task(const std::shared_ptr<CatchGoalHandle>& goal_handle, const bool success, const std::string& reason) {
-    auto result = std::make_shared<Catch::Result>();
-    result->reason = reason;
+    auto result     = std::make_shared<Catch::Result>();
+    result->reason  = reason;
     result->kfs_num = 0;
 
     {
@@ -175,7 +169,7 @@ void Robot::finish_current_task(const std::shared_ptr<CatchGoalHandle>& goal_han
 }
 
 
-void Robot::porcess_task(){
+void Robot::porcess_task() {
     std::shared_ptr<BaseTask> current_task;
     std::string current_task_name;
     std::string previous_task_name;
@@ -197,8 +191,8 @@ void Robot::porcess_task(){
             return;
         }
 
-        current_task = task_it->second;
-        current_task_name = current_task_name_;
+        current_task       = task_it->second;
+        current_task_name  = current_task_name_;
         previous_task_name = last_task_name_;
     }
 
@@ -224,7 +218,9 @@ void Robot::porcess_task(){
         }
 
         if (task_table_.find(next_task_name) == task_table_.end()) {
-            RCLCPP_ERROR(node_->get_logger(), "任务 [%s] 请求切换到未注册任务 [%s]，调度保持等待", current_task_name.c_str(), next_task_name.c_str());
+            RCLCPP_ERROR(
+                node_->get_logger(), "任务 [%s] 请求切换到未注册任务 [%s]，调度保持等待", current_task_name.c_str(),
+                next_task_name.c_str());
             current_task_name_.clear();
             return;
         }
@@ -236,7 +232,7 @@ void Robot::porcess_task(){
     }
 }
 
-void Robot::register_task(std::shared_ptr<BaseTask> task_ptr){
+void Robot::register_task(std::shared_ptr<BaseTask> task_ptr) {
     if (!task_ptr) {
         RCLCPP_ERROR(node_->get_logger(), "注册任务失败: task_ptr 为空");
         return;
@@ -262,7 +258,7 @@ void Robot::register_task(std::shared_ptr<BaseTask> task_ptr){
     task_manager_cv_.notify_all();
 }
 
-void Robot::init_task_manager(const std::string first_task_name){
+void Robot::init_task_manager(const std::string first_task_name) {
     std::lock_guard<std::mutex> lock(task_manager_mutex_);
     if (task_table_.empty()) {
         RCLCPP_ERROR(node_->get_logger(), "初始化任务调度器失败: 当前没有已注册任务");
@@ -294,7 +290,7 @@ void Robot::init_task_manager(const std::string first_task_name){
     task_manager_cv_.notify_all();
 }
 
-bool Robot::set_air_pump(const bool enable){
+bool Robot::set_air_pump(const bool enable) {
     if (!air_pump_command_pub_) {
         RCLCPP_ERROR(node_->get_logger(), "气泵控制发布器未初始化");
         return false;
@@ -314,8 +310,7 @@ bool Robot::set_air_pump(const bool enable){
     return true;
 }
 
-int Robot::set_arm_velocity(const geometry_msgs::msg::Twist &velocity)
-{
+int Robot::set_arm_velocity(const geometry_msgs::msg::Twist& velocity) {
     if (!node_ || !servo_ || !servo_parameters_ || !servo_twist_pub_ || !servo_status_sub_) {
         if (node_) {
             RCLCPP_ERROR(node_->get_logger(), "MoveIt Servo 控制链路存在空指针");
@@ -331,16 +326,15 @@ int Robot::set_arm_velocity(const geometry_msgs::msg::Twist &velocity)
     }
 
     geometry_msgs::msg::TwistStamped twist_command;
-    twist_command.header.stamp = node_->now();
+    twist_command.header.stamp    = node_->now();
     twist_command.header.frame_id = servo_parameters_->robot_link_command_frame;
-    twist_command.twist = velocity;
+    twist_command.twist           = velocity;
     servo_twist_pub_->publish(twist_command);
 
-    const auto wait_deadline =
-        std::chrono::steady_clock::now() + std::chrono::duration<double>(servo_parameters_->publish_period * 2.0);
+    const auto wait_deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(servo_parameters_->publish_period * 2.0);
 
     moveit_servo::StatusCode status = moveit_servo::StatusCode::INVALID;
-    bool has_status = false;
+    bool has_status                 = false;
 
     while (std::chrono::steady_clock::now() < wait_deadline) {
         {
@@ -357,7 +351,7 @@ int Robot::set_arm_velocity(const geometry_msgs::msg::Twist &velocity)
     if (!has_status) {
         std::lock_guard<std::mutex> lock(servo_status_mutex_);
         has_status = servo_status_received_;
-        status = latest_servo_status_;
+        status     = latest_servo_status_;
     }
 
     if (!has_status) {
@@ -366,17 +360,141 @@ int Robot::set_arm_velocity(const geometry_msgs::msg::Twist &velocity)
     }
 
     switch (status) {
-        case moveit_servo::StatusCode::NO_WARNING:
-            return 0;
-        case moveit_servo::StatusCode::DECELERATE_FOR_APPROACHING_SINGULARITY:
-        case moveit_servo::StatusCode::DECELERATE_FOR_LEAVING_SINGULARITY:
-            return 1;
-        case moveit_servo::StatusCode::HALT_FOR_SINGULARITY:
-        case moveit_servo::StatusCode::DECELERATE_FOR_COLLISION:
-        case moveit_servo::StatusCode::HALT_FOR_COLLISION:
-        case moveit_servo::StatusCode::JOINT_BOUND:
-        case moveit_servo::StatusCode::INVALID:
-        default:
-            return -1;
+    case moveit_servo::StatusCode::NO_WARNING: return 0;
+    case moveit_servo::StatusCode::DECELERATE_FOR_APPROACHING_SINGULARITY:
+    case moveit_servo::StatusCode::DECELERATE_FOR_LEAVING_SINGULARITY: return 1;
+    case moveit_servo::StatusCode::HALT_FOR_SINGULARITY:
+    case moveit_servo::StatusCode::DECELERATE_FOR_COLLISION:
+    case moveit_servo::StatusCode::HALT_FOR_COLLISION:
+    case moveit_servo::StatusCode::JOINT_BOUND:
+    case moveit_servo::StatusCode::INVALID:
+    default: return -1;
     }
+}
+
+moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const geometry_msgs::msg::Pose& target_pose, int max_retyr) {
+    if (!move_group_interface) {
+        RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行位姿规划");
+        return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+    }
+
+    if (max_retyr <= 0) {
+        max_retyr = 1;
+    }
+
+    moveit::core::MoveItErrorCode last_error(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+
+    for (int attempt = 1; attempt <= max_retyr; ++attempt) {
+        move_group_interface->setStartStateToCurrentState();
+        move_group_interface->setPoseTarget(target_pose);
+
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        last_error = move_group_interface->plan(plan);
+        if (last_error != moveit::core::MoveItErrorCode::SUCCESS) {
+            RCLCPP_WARN(
+                node_->get_logger(), "位姿规划失败，第 %d/%d 次尝试，错误码: %d", attempt, max_retyr, last_error.val);
+            move_group_interface->clearPoseTargets();
+            continue;
+        }
+
+        last_error = move_group_interface->execute(plan);
+        move_group_interface->clearPoseTargets();
+        if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
+            RCLCPP_INFO(node_->get_logger(), "位姿规划并执行成功");
+            return last_error;
+        }
+
+        RCLCPP_WARN(
+            node_->get_logger(), "轨迹执行失败，第 %d/%d 次尝试，错误码: %d", attempt, max_retyr, last_error.val);
+    }
+
+    return last_error;
+}
+
+moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const std::string& pose_name, int max_retyr) {
+    if (!move_group_interface) {
+        RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行命名位姿规划");
+        return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+    }
+
+    if (max_retyr <= 0) {
+        max_retyr = 1;
+    }
+
+    moveit::core::MoveItErrorCode last_error(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+
+    for (int attempt = 1; attempt <= max_retyr; ++attempt) {
+        move_group_interface->setStartStateToCurrentState();
+        const bool target_set = move_group_interface->setNamedTarget(pose_name);
+        if (!target_set) {
+            RCLCPP_ERROR(node_->get_logger(), "设置命名位姿 [%s] 失败", pose_name.c_str());
+            return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::INVALID_GOAL_CONSTRAINTS);
+        }
+
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        last_error = move_group_interface->plan(plan);
+        if (last_error != moveit::core::MoveItErrorCode::SUCCESS) {
+            RCLCPP_WARN(
+                node_->get_logger(), "命名位姿 [%s] 规划失败，第 %d/%d 次尝试，错误码: %d", pose_name.c_str(), attempt,
+                max_retyr, last_error.val);
+            continue;
+        }
+
+        last_error = move_group_interface->execute(plan);
+        if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
+            RCLCPP_INFO(node_->get_logger(), "命名位姿 [%s] 规划并执行成功", pose_name.c_str());
+            return last_error;
+        }
+
+        RCLCPP_WARN(
+            node_->get_logger(), "命名位姿 [%s] 轨迹执行失败，第 %d/%d 次尝试，错误码: %d", pose_name.c_str(), attempt,
+            max_retyr, last_error.val);
+    }
+
+    return last_error;
+}
+
+moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(const geometry_msgs::msg::Pose& target_pose, int max_retry) {
+    if (!move_group_interface) {
+        RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行笛卡尔路径规划");
+        return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+    }
+
+    if (max_retry <= 0) {
+        max_retry = 1;
+    }
+
+    moveit::core::MoveItErrorCode last_error(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+
+    for (int attempt = 1; attempt <= max_retry; ++attempt) {
+        move_group_interface->setStartStateToCurrentState();
+
+        std::vector<geometry_msgs::msg::Pose> waypoints;
+        waypoints.emplace_back(target_pose);
+
+        moveit_msgs::msg::RobotTrajectory trajectory;
+        const double fraction = move_group_interface->computeCartesianPath(
+            waypoints, 0.01, 0.0, trajectory, true);
+
+        if (fraction < 0.999) {
+            RCLCPP_WARN(
+                node_->get_logger(), "笛卡尔路径规划不完整，第 %d/%d 次尝试，完成率: %.3f", attempt, max_retry, fraction);
+            last_error = moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::PLANNING_FAILED);
+            continue;
+        }
+
+        moveit::planning_interface::MoveGroupInterface::Plan plan;
+        plan.trajectory_ = std::move(trajectory);
+
+        last_error = move_group_interface->execute(plan);
+        if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
+            RCLCPP_INFO(node_->get_logger(), "笛卡尔路径规划并执行成功");
+            return last_error;
+        }
+
+        RCLCPP_WARN(
+            node_->get_logger(), "笛卡尔轨迹执行失败，第 %d/%d 次尝试，错误码: %d", attempt, max_retry, last_error.val);
+    }
+
+    return last_error;
 }
