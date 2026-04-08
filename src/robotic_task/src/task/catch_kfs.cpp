@@ -215,7 +215,7 @@ std::string CatchKFS::process(const std::string last_task_name) {
         robot->finish_current_task(goal_handle, false, "气泵开启失败");
         return "idel";
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
 
     publish_feedback(goal_handle, 5, "向前补推以稳定吸附");
     auto arm_final_pose = robot->move_group_interface->getCurrentPose().pose;
@@ -226,14 +226,14 @@ std::string CatchKFS::process(const std::string last_task_name) {
     arm_final_pose.orientation.z = q.getZ();
     arm_final_pose.orientation.w = q.getW();
     arm_final_pose.position.x += 0.05;
-    move_result = robot->plan_and_execut_from_current_state_cart(arm_final_pose);
+    move_result = robot->plan_and_execut_from_current_state_cart(arm_final_pose,3,0.5,0.5);
     if (move_result != moveit::core::MoveItErrorCode::SUCCESS) {
         robot->finish_current_task(goal_handle, false, "补推失败");
         return "idel";
     }
 
     publish_feedback(goal_handle, 7, "携带目标返回准备位");
-    move_result = robot->plan_and_execut_from_current_state("idel_pos");
+    move_result = robot->plan_and_execut_from_current_state("idel_pos",3,0.5,0.5);
     if (move_result != moveit::core::MoveItErrorCode::SUCCESS) {
         robot->finish_current_task(goal_handle, false, "抓取完成后返回准备位失败");
         return "idel";

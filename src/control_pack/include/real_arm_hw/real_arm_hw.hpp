@@ -61,7 +61,7 @@ private:
     std::atomic_bool device_ready_{false};
     std::mutex arm_target_mutex_;
 
-    Arm_t arm_target_{};
+    ArmTarget_t arm_target_{};
 
     std::atomic_bool enable_air_pump_{false};
 };

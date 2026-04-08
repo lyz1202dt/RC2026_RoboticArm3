@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <rclcpp/logging.hpp>
 #include <utility>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
@@ -72,13 +73,13 @@ hardware_interface::CallbackReturn RealArmControl::on_init(const hardware_interf
     }
 
     arm_target_.pack_type = 1;
-    arm_target_.air_pump_enable = enable_air_pump_.load() ? 1 : 0;
+    arm_target_.air_pump = enable_air_pump_.load() ? 1 : 0;
 
     if (air_pump_command_index_ != std::numeric_limits<std::size_t>::max()) {
-        gpio_command_values_[air_pump_command_index_] = static_cast<double>(arm_target_.air_pump_enable);
+        gpio_command_values_[air_pump_command_index_] = static_cast<double>(arm_target_.air_pump);
     }
     if (air_pump_state_index_ != std::numeric_limits<std::size_t>::max()) {
-        gpio_state_values_[air_pump_state_index_] = static_cast<double>(arm_target_.air_pump_enable);
+        gpio_state_values_[air_pump_state_index_] = static_cast<double>(arm_target_.air_pump);
     }
 
     return hardware_interface::CallbackReturn::SUCCESS;
@@ -166,10 +167,11 @@ hardware_interface::return_type RealArmControl::write(const rclcpp::Time &, cons
         enable_air_pump_ = gpio_command_values_[air_pump_command_index_] >= 0.5;
     }
     arm_target_.pack_type = 1;
-    arm_target_.air_pump_enable = enable_air_pump_.load() ? 1 : 0;
+    arm_target_.air_pump = enable_air_pump_.load() ? 1 : 0;
+    //RCLCPP_INFO(rclcpp::get_logger("real_arm_hw"),  "Air pump value: %d", (int)arm_target_.air_pump);
 
     if (air_pump_state_index_ != std::numeric_limits<std::size_t>::max()) {
-        gpio_state_values_[air_pump_state_index_] = static_cast<double>(arm_target_.air_pump_enable);
+        gpio_state_values_[air_pump_state_index_] = static_cast<double>(arm_target_.air_pump);
     }
 
     for (std::size_t i = 0; i < joint_names_.size(); ++i) {
@@ -190,11 +192,11 @@ hardware_interface::return_type RealArmControl::write(const rclcpp::Time &, cons
 
 void RealArmControl::handle_arm_state(const uint8_t * data, int size)
 {
-    if (size != static_cast<int>(sizeof(Arm_t))) {
+    if (size != static_cast<int>(sizeof(ArmState_t))) {
         return;
     }
 
-    const auto * pack = reinterpret_cast<const Arm_t *>(data);
+    const auto * pack = reinterpret_cast<const ArmState_t *>(data);
     if (pack->pack_type != 1) {
         return;
     }

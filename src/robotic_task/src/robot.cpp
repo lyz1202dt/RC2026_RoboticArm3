@@ -4,10 +4,70 @@
 #include "task/idel.hpp"
 #include "task/servo_demo.hpp"
 #include <chrono>
+#include <moveit/robot_trajectory/robot_trajectory.h>
+#include <moveit/trajectory_processing/iterative_time_parameterization.h>
 #include <moveit_msgs/msg/move_it_error_codes.hpp>
 #include <moveit_msgs/msg/robot_trajectory.hpp>
 #include <thread>
 #include <utility>
+
+namespace {
+double sanitize_scaling_factor(const rclcpp::Logger& logger, const char* factor_name, const double scaling_factor) {
+    if (scaling_factor < 0.0) {
+        RCLCPP_WARN(logger, "%s=%.3f 小于 0，将按 0.0 处理（不额外指定缩放）", factor_name, scaling_factor);
+        return 0.0;
+    }
+
+    if (scaling_factor > 1.0) {
+        RCLCPP_WARN(logger, "%s=%.3f 大于 1，将按 1.0 处理", factor_name, scaling_factor);
+        return 1.0;
+    }
+
+    return scaling_factor;
+}
+
+void apply_motion_scaling(
+    const std::shared_ptr<moveit::planning_interface::MoveGroupInterface>& move_group_interface, const rclcpp::Logger& logger,
+    const double velocity_scaling_factor, const double acceleration_scaling_factor) {
+    const double sanitized_velocity_scaling_factor =
+        sanitize_scaling_factor(logger, "velocity_scaling_factor", velocity_scaling_factor);
+    const double sanitized_acceleration_scaling_factor =
+        sanitize_scaling_factor(logger, "acceleration_scaling_factor", acceleration_scaling_factor);
+
+    move_group_interface->setMaxVelocityScalingFactor(sanitized_velocity_scaling_factor);
+    move_group_interface->setMaxAccelerationScalingFactor(sanitized_acceleration_scaling_factor);
+}
+
+bool retime_cartesian_trajectory(
+    const std::shared_ptr<moveit::planning_interface::MoveGroupInterface>& move_group_interface, const rclcpp::Logger& logger,
+    moveit_msgs::msg::RobotTrajectory& trajectory, const double velocity_scaling_factor,
+    const double acceleration_scaling_factor) {
+    auto current_state = move_group_interface->getCurrentState(1.0);
+    if (!current_state) {
+        RCLCPP_ERROR(logger, "获取当前机器人状态失败，无法为笛卡尔轨迹重新进行时间参数化");
+        return false;
+    }
+
+    robot_trajectory::RobotTrajectory robot_trajectory(move_group_interface->getRobotModel(), move_group_interface->getName());
+    robot_trajectory.setRobotTrajectoryMsg(*current_state, trajectory);
+
+    trajectory_processing::IterativeParabolicTimeParameterization time_parameterization;
+    const double sanitized_velocity_scaling_factor =
+        sanitize_scaling_factor(logger, "velocity_scaling_factor", velocity_scaling_factor);
+    const double sanitized_acceleration_scaling_factor =
+        sanitize_scaling_factor(logger, "acceleration_scaling_factor", acceleration_scaling_factor);
+
+    if (!time_parameterization.computeTimeStamps(
+            robot_trajectory, sanitized_velocity_scaling_factor == 0.0 ? 1.0 : sanitized_velocity_scaling_factor,
+            sanitized_acceleration_scaling_factor == 0.0 ? 1.0 : sanitized_acceleration_scaling_factor)) {
+        RCLCPP_ERROR(logger, "笛卡尔轨迹时间参数化失败");
+        return false;
+    }
+
+    robot_trajectory.getRobotTrajectoryMsg(trajectory);
+    return true;
+}
+} // namespace
 
 Robot::Robot(const rclcpp::Node::SharedPtr node) {
     using namespace std::chrono_literals;
@@ -439,7 +499,9 @@ int Robot::set_arm_velocity(const geometry_msgs::msg::Twist& velocity) {
     }
 }
 
-moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const geometry_msgs::msg::Pose& target_pose, int max_retyr) {
+moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(
+    const geometry_msgs::msg::Pose& target_pose, int max_retyr, double velocity_scaling_factor,
+    double acceleration_scaling_factor) {
     if (!move_group_interface) {
         RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行位姿规划");
         return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
@@ -454,6 +516,8 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const ge
     }
 
     moveit::core::MoveItErrorCode last_error(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+
+    apply_motion_scaling(move_group_interface, node_->get_logger(), velocity_scaling_factor, acceleration_scaling_factor);
 
     for (int attempt = 1; attempt <= max_retyr; ++attempt) {
         move_group_interface->setStartStateToCurrentState();
@@ -472,6 +536,7 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const ge
         move_group_interface->clearPoseTargets();
         if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
             RCLCPP_INFO(node_->get_logger(), "位姿规划并执行成功");
+            apply_motion_scaling(move_group_interface, node_->get_logger(), 0.0, 0.0);
             switch_motion_mode(MotionMode::IDEL);
             return last_error;
         }
@@ -480,11 +545,13 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const ge
             node_->get_logger(), "轨迹执行失败，第 %d/%d 次尝试，错误码: %d", attempt, max_retyr, last_error.val);
     }
 
+    apply_motion_scaling(move_group_interface, node_->get_logger(), 0.0, 0.0);
     switch_motion_mode(MotionMode::IDEL);
     return last_error;
 }
 
-moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const std::string& pose_name, int max_retyr) {
+moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(
+    const std::string& pose_name, int max_retyr, double velocity_scaling_factor, double acceleration_scaling_factor) {
     if (!move_group_interface) {
         RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行命名位姿规划");
         return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
@@ -500,11 +567,14 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const st
 
     moveit::core::MoveItErrorCode last_error(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
 
+    apply_motion_scaling(move_group_interface, node_->get_logger(), velocity_scaling_factor, acceleration_scaling_factor);
+
     for (int attempt = 1; attempt <= max_retyr; ++attempt) {
         move_group_interface->setStartStateToCurrentState();
         const bool target_set = move_group_interface->setNamedTarget(pose_name);
         if (!target_set) {
             RCLCPP_ERROR(node_->get_logger(), "设置命名位姿 [%s] 失败", pose_name.c_str());
+            apply_motion_scaling(move_group_interface, node_->get_logger(), 0.0, 0.0);
             switch_motion_mode(MotionMode::IDEL);
             return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::INVALID_GOAL_CONSTRAINTS);
         }
@@ -521,6 +591,7 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const st
         last_error = move_group_interface->execute(plan);
         if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
             RCLCPP_INFO(node_->get_logger(), "命名位姿 [%s] 规划并执行成功", pose_name.c_str());
+            apply_motion_scaling(move_group_interface, node_->get_logger(), 0.0, 0.0);
             switch_motion_mode(MotionMode::IDEL);
             return last_error;
         }
@@ -530,11 +601,14 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state(const st
             max_retyr, last_error.val);
     }
 
+    apply_motion_scaling(move_group_interface, node_->get_logger(), 0.0, 0.0);
     switch_motion_mode(MotionMode::IDEL);
     return last_error;
 }
 
-moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(const geometry_msgs::msg::Pose& target_pose, int max_retry) {
+moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(
+    const geometry_msgs::msg::Pose& target_pose, int max_retry, double velocity_scaling_factor,
+    double acceleration_scaling_factor) {
     if (!move_group_interface) {
         RCLCPP_ERROR(node_->get_logger(), "MoveGroupInterface 未初始化，无法执行笛卡尔路径规划");
         return moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
@@ -549,6 +623,8 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(con
     }
 
     moveit::core::MoveItErrorCode last_error(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+
+    apply_motion_scaling(move_group_interface, node_->get_logger(), velocity_scaling_factor, acceleration_scaling_factor);
 
     for (int attempt = 1; attempt <= max_retry; ++attempt) {
         move_group_interface->setStartStateToCurrentState();
@@ -567,12 +643,20 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(con
             continue;
         }
 
+        if (!retime_cartesian_trajectory(
+                move_group_interface, node_->get_logger(), trajectory, velocity_scaling_factor,
+                acceleration_scaling_factor)) {
+            last_error = moveit::core::MoveItErrorCode(moveit_msgs::msg::MoveItErrorCodes::FAILURE);
+            continue;
+        }
+
         moveit::planning_interface::MoveGroupInterface::Plan plan;
         plan.trajectory_ = std::move(trajectory);
 
         last_error = move_group_interface->execute(plan);
         if (last_error == moveit::core::MoveItErrorCode::SUCCESS) {
             RCLCPP_INFO(node_->get_logger(), "笛卡尔路径规划并执行成功");
+            apply_motion_scaling(move_group_interface, node_->get_logger(), 0.0, 0.0);
             switch_motion_mode(MotionMode::IDEL);
             return last_error;
         }
@@ -581,6 +665,7 @@ moveit::core::MoveItErrorCode Robot::plan_and_execut_from_current_state_cart(con
             node_->get_logger(), "笛卡尔轨迹执行失败，第 %d/%d 次尝试，错误码: %d", attempt, max_retry, last_error.val);
     }
 
+    apply_motion_scaling(move_group_interface, node_->get_logger(), 0.0, 0.0);
     switch_motion_mode(MotionMode::IDEL);
     return last_error;
 }

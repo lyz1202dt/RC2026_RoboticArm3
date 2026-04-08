@@ -167,10 +167,16 @@ public:
     bool set_air_pump(const bool enable);
 
     //机械臂轨迹离线规划和执行
-    //从当前位置通过关节空间规划到目标位姿
-    moveit::core::MoveItErrorCode plan_and_execut_from_current_state(const geometry_msgs::msg::Pose& target_pose, int max_retyr = 3);
-    //从当前位置通过关节空间规划到目标位姿（目标位姿以预设的命名方式存储在MoveIt中）
-    moveit::core::MoveItErrorCode plan_and_execut_from_current_state(const std::string& pose_name, int max_retyr = 3);
-    //从当前位置通过笛卡尔空间插值的方式规划到目标位姿
-    moveit::core::MoveItErrorCode plan_and_execut_from_current_state_cart(const geometry_msgs::msg::Pose& target_pose, int max_retry = 3);
+    //从当前位置通过关节空间规划到目标位姿，velocity/acceleration_scaling_factor 取值范围为 [0, 1]，传 0 表示不额外指定缩放
+    moveit::core::MoveItErrorCode plan_and_execut_from_current_state(
+        const geometry_msgs::msg::Pose& target_pose, int max_retyr = 3, double velocity_scaling_factor = 0.0,
+        double acceleration_scaling_factor = 0.0);
+    //从当前位置通过关节空间规划到目标位姿（目标位姿以预设的命名方式存储在MoveIt中），velocity/acceleration_scaling_factor 取值范围为 [0, 1]，传 0 表示不额外指定缩放
+    moveit::core::MoveItErrorCode plan_and_execut_from_current_state(
+        const std::string& pose_name, int max_retyr = 3, double velocity_scaling_factor = 0.0,
+        double acceleration_scaling_factor = 0.0);
+    //从当前位置通过笛卡尔空间插值的方式规划到目标位姿，velocity/acceleration_scaling_factor 取值范围为 [0, 1]，传 0 表示不额外指定缩放
+    moveit::core::MoveItErrorCode plan_and_execut_from_current_state_cart(
+        const geometry_msgs::msg::Pose& target_pose, int max_retry = 3, double velocity_scaling_factor = 0.0,
+        double acceleration_scaling_factor = 0.0);
 };
